@@ -1,0 +1,11 @@
+boxsdk==10.0.1
+certifi==2025.11.12
+charset-normalizer==3.4.4
+idna==3.11
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.1
+requests==2.32.5
+requests-toolbelt==1.0.0
+six==1.17.0
+smartsheet-python-sdk==3.5.5
+urllib3==2.5.0
