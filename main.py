@@ -1,9 +1,10 @@
-import os, json, sys
+import os, sys
 from dotenv import load_dotenv
 
 import smartsheet
 from smartsheet.smartsheet import Smartsheet
 from smartsheet.models.index_result import IndexResult
+from smartsheet.models import Sheet
 
 
 """
@@ -34,7 +35,6 @@ def get_smartsheet_client(access_token: str) -> Smartsheet:
     """
     
     # Fetch Smartsheet client
-    print(f"Fetching Smartsheet Client...")
     smartsheet_client = smartsheet.Smartsheet(access_token=SMARTSHEET_ACCESS_TOKEN)
 
     # Test API call to see if smartsheet token was successfully authenticated.
@@ -49,30 +49,65 @@ def get_smartsheet_client(access_token: str) -> Smartsheet:
     return smartsheet_client
 
 
+def get_rows_awaiting_saving(smartsheet_client: Smartsheet, sheet_id:int):
+    """
+    Fetches rows that have the status=='Saving to Box'
+    
+    Args:
+        smartsheet_client: Smartsheet client object
+        sheet_id: Smartsheet Employees sheet id
+    
+    Returns:
+        Smartsheet object or raise Smartsheet Error
+    """
+    SAVING_STATUS = "Saving to Box"
+
+    sheet:Sheet = smartsheet_client.Sheets.get_sheet(sheet_id=sheet_id)
+    rows = sheet.rows
+
+    filtered_rows = []
+    for row in rows:
+        row = row.to_dict().get("cells")
+        row_status = row[0].get("value","")
+        if row_status.lower() == SAVING_STATUS.lower():
+            filtered_rows.append(row)
+        
+    return filtered_rows
+
+
 def main():
     SHEET_ID = 2580213150994308
 
+    # Get Smartsheet Client
     try:
+        print(f"Fetching Smartsheet Client...")
         smartsheet_client = get_smartsheet_client(access_token=SMARTSHEET_ACCESS_TOKEN)
     except RuntimeError as err:
-        print("Failed to fetch smartsheet client...")
+        print("❌Failed to fetch smartsheet client...")
         print(f"Error: {err}")
         sys.exit(1)
 
-    # response: IndexResult = smartsheet_client.Sheets.list_sheets()
-    # response = smartsheet_client.Sheets.get_sheet(sheet_id=SHEET_ID)
-    # response_json = response.to_json()
-    # sheetId = response.data[0].id               # Get the ID of the first sheet in the response
-    # sheet = smart.Sheets.get_sheet(sheetId)     # Load the sheet by using its ID
+    # Get rows by status == "Saving to Box"
+    try:
+        filtered_rows = get_rows_awaiting_saving(smartsheet_client=smartsheet_client, sheet_id=SHEET_ID)
+        if len(filtered_rows) == 0:
+            print("✅ Finished early. Now rows with status 'Saving to Box'")
+            sys.exit(1)
+        print(f"Found {len(filtered_rows)} rows with the status 'Saving to Box'...")
+    except Exception as err:
+        print("❌Failed to fetch and filter rows...")
+        print(f"Error: {err}")
+        sys.exit(1)
 
-    # response = json.loads(json_string)
-    # pretty_response = json.dumps(response, indent=4)
+    # TODO: Send/save EPR attachment(s) to Box
 
-    # print(pretty_response)
-    # print(response)
-    # print(type(response))
+    # TODO: Copy row to history records table in Smartsheet
 
-# print(f"The sheet {sheet.name} has {sheet.total_row_count} rows")   # Print information about the sheet
+    # TODO: Reset columns to update them for next EPR due date
+
+
+    print(f"✅ Smartsheet script ran successfully! {len(filtered_rows)} EPRs saved and updated for next EPR due date!")
+
 
 if __name__ == "__main__":
     main()
