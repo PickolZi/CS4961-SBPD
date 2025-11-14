@@ -67,11 +67,15 @@ def get_rows_awaiting_saving(smartsheet_client: Smartsheet, sheet_id:int):
 
     filtered_rows = []
     for row in rows:
-        row = row.to_dict().get("cells")
-        row_status = row[0].get("value","")
+        row = row.to_dict()
+        row_id = row.get("id")
+        cells = row.get("cells")
+        row_status = cells[0].get("value","")
+
+        filtered_row = [{"rowId": row_id}] + cells
         if row_status.lower() == SAVING_STATUS.lower():
-            filtered_rows.append(row)
-        
+            filtered_rows.append(filtered_row)
+
     return filtered_rows
 
 
@@ -83,7 +87,7 @@ def main():
         print(f"Fetching Smartsheet Client...")
         smartsheet_client = get_smartsheet_client(access_token=SMARTSHEET_ACCESS_TOKEN)
     except RuntimeError as err:
-        print("❌Failed to fetch smartsheet client...")
+        print("❌ Failed to fetch smartsheet client...")
         print(f"Error: {err}")
         sys.exit(1)
 
@@ -95,7 +99,7 @@ def main():
             sys.exit(1)
         print(f"Found {len(filtered_rows)} rows with the status 'Saving to Box'...")
     except Exception as err:
-        print("❌Failed to fetch and filter rows...")
+        print("❌ Failed to fetch and filter rows...")
         print(f"Error: {err}")
         sys.exit(1)
 
