@@ -1,10 +1,15 @@
 import os, sys
+from datetime import date
+from collections import defaultdict
 from dotenv import load_dotenv
 
 import smartsheet
 from smartsheet.smartsheet import Smartsheet
+from smartsheet.models.attachment import Attachment
 from smartsheet.models.index_result import IndexResult
 from smartsheet.models import Sheet
+
+import box as box_helper
 
 
 """
@@ -17,6 +22,14 @@ Script that:
 Requirements:
 - Smartsheet library (install with: `pip install smartsheet-python-sdk` or `pip install -r requirements.txt`)
 - Smartsheet API Key (Can be created in Apps & Integrations)
+"""
+
+SHEET_ID = 2580213150994308
+error_map = defaultdict(list)  # Will email to someone to fix manually
+"""
+error_map = {
+    '$row_id': ['ERROR_MESSAGES']
+}
 """
 
 load_dotenv()
@@ -48,7 +61,6 @@ def get_smartsheet_client(access_token: str) -> Smartsheet:
 
     return smartsheet_client
 
-
 def get_rows_awaiting_saving(smartsheet_client: Smartsheet, sheet_id:int):
     """
     Fetches rows that have the status=='Saving to Box'
@@ -78,10 +90,72 @@ def get_rows_awaiting_saving(smartsheet_client: Smartsheet, sheet_id:int):
 
     return filtered_rows
 
+def save_epr_attachments_to_box(smartsheet_client: Smartsheet, filtered_rows: list, error_map: dict):
+    """
+    Save all the filtered row's attachements in to Box
+    
+    Args:
+        smartsheet_client: Smartsheet client object
+        filtered_rows: Smartsheet Employees sheet rows that status == 'Saving to Box'
+        error_map: carries errors for each row if any occurs
+    
+    Returns:
+        None
+
+    Throws:
+        RuntimeError: If there is an error uploading any attachments to box
+    """
+    NO_ATTACHMENT_ERROR_MESSAGE = "Must have atleast 1 EPR attached"
+    ATTACHMENT_FILE_ALREADY_EXISTS_ERROR_MESSAGE = "Attachment already exists in Box"
+    ATTACHMENT_UNKNOWN_ERROR_MESSAGE = "Attachment failed to upload to Box for an unknown reason"
+
+    for idx, row in enumerate(filtered_rows):
+        row_id = row[0].get("rowId")
+        # [ASK] - Upload all attachments? Or just the latest one?
+        response: IndexResult = smartsheet_client.Attachments.list_row_attachments(SHEET_ID, row_id)
+        attachments = response.data
+        if len(attachments) == 0:
+            error_map[row_id].append(NO_ATTACHMENT_ERROR_MESSAGE)
+            continue
+
+        attachments.sort(key=lambda x: x.created_at)  # Sort by attachment added date
+        latest_attachment: Attachment = attachments[-1]
+        attachment_id = latest_attachment.id
+
+        # Have to manually fetch AGAIN the attachment because of a bug where listing attachments
+        # removes the url from the object. Therefore, can not download attachment.
+        attachment: Attachment = smartsheet_client.Attachments.get_attachment(SHEET_ID, attachment_id)
+        attachment_url = attachment.url
+        
+        # Parse the columns. Will need to update columns if columns are ever increased/decreased.
+        first_name = row[4]["value"].upper()
+        last_name = row[5]["value"].upper()
+        today_string = date.today().strftime("%Y-%m-%d")
+
+        # Uncomment to get columns
+        # for cell in row[1:]:
+        #     print(cell)
+
+        # [ASK] - What format should the EPR copies be?
+        # LASTNAME-FIRSTNAME-YYYY-MM-DD-EPR
+        filename = f"{last_name}-{first_name}-{today_string}.pdf"
+
+        # # Use box helper to upload attachment from Smartsheet to Box
+        counter = f"{idx+1}/{len(filtered_rows)}"
+        try:
+            uploaded_file = box_helper.upload_file_to_box_by_url(attachment_url, filename)
+            print(f"✅ ({counter}) File uploaded successfully!")
+            print(f"  File ID: {uploaded_file.id}")
+            print(f"  File Name: {uploaded_file.name}")
+            print(f"  File URL: https://app.box.com/file/{uploaded_file.id}")
+        except FileExistsError as err:
+            print(f"🚧 ({counter}) Error: {err}")
+            error_map[row_id].append(ATTACHMENT_FILE_ALREADY_EXISTS_ERROR_MESSAGE)
+        except Exception as e:
+            print(f"🚧 ({counter}) Error uploading file: {e}")
+            error_map[row_id].append(ATTACHMENT_UNKNOWN_ERROR_MESSAGE)
 
 def main():
-    SHEET_ID = 2580213150994308
-
     # Get Smartsheet Client
     try:
         print(f"Fetching Smartsheet Client...")
@@ -95,7 +169,7 @@ def main():
     try:
         filtered_rows = get_rows_awaiting_saving(smartsheet_client=smartsheet_client, sheet_id=SHEET_ID)
         if len(filtered_rows) == 0:
-            print("✅ Finished early. Now rows with status 'Saving to Box'")
+            print("✅ Finished early. No rows with status 'Saving to Box'")
             sys.exit(1)
         print(f"Found {len(filtered_rows)} rows with the status 'Saving to Box'...")
     except Exception as err:
@@ -104,13 +178,15 @@ def main():
         sys.exit(1)
 
     # TODO: Send/save EPR attachment(s) to Box
+    print(f"Sending {len(filtered_rows)} EPR attachment(s) to Box")
+    save_epr_attachments_to_box(smartsheet_client, filtered_rows, error_map)
 
     # TODO: Copy row to history records table in Smartsheet
 
     # TODO: Reset columns to update them for next EPR due date
 
 
-    print(f"✅ Smartsheet script ran successfully! {len(filtered_rows)} EPRs saved and updated for next EPR due date!")
+    print(f"\n✅ Smartsheet script ran successfully! {len(filtered_rows)} EPRs saved and updated for next EPR due date!")
 
 
 if __name__ == "__main__":

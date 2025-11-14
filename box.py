@@ -45,7 +45,7 @@ def upload_file_to_box_by_url(s3_url, filename, folder_id=FOLDER_ID):
     
     # Upload file to box com
     uploaded_files: Files | None = None
-    print(f"Uploading {s3_url} to Box folder {folder_id}...")
+    # print(f"Uploading {s3_url} to Box folder {folder_id}...")
     try:
         response = requests.get(s3_url)
 
