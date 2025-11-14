@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from box_sdk_gen import BoxClient, BoxDeveloperTokenAuth
 
 from box_sdk_gen.managers.uploads import UploadFileAttributes, UploadFileAttributesParentField
-from box_sdk_gen.box.errors import BoxAPIError
+from box_sdk_gen.box.errors import BoxAPIError, BoxSDKError
 from box_sdk_gen.schemas import Files
 
 """
@@ -60,6 +60,9 @@ def upload_file_to_box_by_url(s3_url, filename, folder_id=FOLDER_ID):
     except BoxAPIError as err:
         if err.response_info.status_code == 409:
             raise FileExistsError(f"File already exists in Box: {filename}")
+    except BoxSDKError as err:
+        # Likely just need to refresh Developer Token
+        raise RuntimeError(err.message)
     
     if not uploaded_files:
         raise RuntimeError(f"Something failed when uploading: {filename}")

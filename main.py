@@ -151,8 +151,10 @@ def save_epr_attachments_to_box(smartsheet_client: Smartsheet, filtered_rows: li
         except FileExistsError as err:
             print(f"🚧 ({counter}) Error: {err}")
             error_map[row_id].append(ATTACHMENT_FILE_ALREADY_EXISTS_ERROR_MESSAGE)
-        except Exception as e:
-            print(f"🚧 ({counter}) Error uploading file: {e}")
+        except RuntimeError as err:
+            raise err
+        except Exception as err:
+            print(f"🚧 ({counter}) Error uploading file: {err}")
             error_map[row_id].append(ATTACHMENT_UNKNOWN_ERROR_MESSAGE)
 
 def main():
@@ -161,7 +163,7 @@ def main():
         print(f"Fetching Smartsheet Client...")
         smartsheet_client = get_smartsheet_client(access_token=SMARTSHEET_ACCESS_TOKEN)
     except RuntimeError as err:
-        print("❌ Failed to fetch smartsheet client...")
+        print("\n❌ Failed to fetch smartsheet client...")
         print(f"Error: {err}")
         sys.exit(1)
 
@@ -174,7 +176,7 @@ def main():
             sys.exit(1)
         print(f"Found {len(filtered_rows)} rows with the status 'Saving to Box'...")
     except Exception as err:
-        print("❌ Failed to fetch and filter rows...")
+        print("\n❌ Failed to fetch and filter rows...")
         print(f"Error: {err}")
         sys.exit(1)
 
@@ -194,8 +196,9 @@ def main():
     except Exception as err:
         # If this is ran, then a MAJOR error occurred with possible side effects - attachments saved
         # in Box but changes not reflected in Smartsheet.
-        print("❌ Failed to save attachments to Box...")
+        print("\n❌ Failed to save attachments to Box...")
         print(f"Error: {err}")
+        print("Try refreshing Box's Developer Token")
         sys.exit(1)
 
 
