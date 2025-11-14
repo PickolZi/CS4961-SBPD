@@ -25,6 +25,7 @@ Requirements:
 """
 
 SHEET_ID = 2580213150994308
+HISTORY_SHEET_ID = 1945788230881156
 error_map = defaultdict(list)  # Will email to someone to fix manually
 """
 error_map = {
@@ -157,6 +158,71 @@ def save_epr_attachments_to_box(smartsheet_client: Smartsheet, filtered_rows: li
             print(f"🚧 ({counter}) Error uploading file: {err}")
             error_map[row_id].append(ATTACHMENT_UNKNOWN_ERROR_MESSAGE)
 
+def copy_smartsheet_rows_to_history_table(smartsheet_client: Smartsheet, filtered_rows: list, error_map: dict):
+    """
+    Save all the successful rows to the history table
+    
+    Args:
+        smartsheet_client: Smartsheet client object
+        filtered_rows: Smartsheet Employees sheet rows that status == 'Saving to Box'
+        error_map: carries errors for each row if any occurs
+    
+    Returns:
+        None
+
+    Throws:
+        RuntimeError: If there is an error copying a row
+    """
+    COPY_SMARTSHEET_ROW_ERROR_MESSAGE = "Row failed to be saved in the history table"
+
+    for row in filtered_rows:
+        row_id = row[0]["rowId"]
+        first_name = row[4]["value"].upper()
+        last_name = row[5]["value"].upper()
+
+        # We don't want rows that previously have had errors.
+        if row_id in error_map:
+            continue
+
+        try:
+            copy_request = smartsheet.models.CopyOrMoveRowDirective({
+                "row_ids": [row_id],
+                "to": smartsheet.models.CopyOrMoveRowDestination({
+                    "sheet_id": HISTORY_SHEET_ID
+                })
+            })
+
+            response = smartsheet_client.Sheets.copy_rows(
+                SHEET_ID,
+                copy_request
+            )
+
+            response = response.to_dict()
+            date_saved_row_id = response["rowMappings"][0]["to"]
+
+            today_string = date.today().strftime("%Y-%m-%d")
+
+            sheet = smartsheet_client.Sheets.get_sheet(HISTORY_SHEET_ID)
+            leftmost_col_id = sheet.columns[0].id
+
+            update_row = smartsheet.models.Row()
+            update_row.id = date_saved_row_id
+            update_row.cells = [
+                smartsheet.models.Cell({
+                    "column_id": leftmost_col_id,
+                    "value": today_string
+                })
+            ]
+
+            # Apply the update
+            smartsheet_client.Sheets.update_rows(
+                HISTORY_SHEET_ID,
+                [update_row]
+            )
+        except Exception as err:
+            print(f"🚧 Error saving row to history table for {first_name} {last_name}")
+            error_map[row_id].append(COPY_SMARTSHEET_ROW_ERROR_MESSAGE)
+        
 def main():
     # Get Smartsheet Client
     try:
@@ -201,9 +267,19 @@ def main():
         print("Try refreshing Box's Developer Token")
         sys.exit(1)
 
+    successful_epr_count = len(filtered_rows) - len(error_map)
+    # Copy row to history records table in Smartsheet
+    try:
+        print(f"Copying {successful_epr_count} successful rows to the history records table...")
+        copy_smartsheet_rows_to_history_table(smartsheet_client, filtered_rows, error_map)
 
-    # TODO: Copy row to history records table in Smartsheet
-
+        if len(error_map) > 0 and len(error_map) == len(filtered_rows):
+            raise RuntimeError("Every single row failed to save to history map. Please contact this email... ")
+    except Exception as err:
+        # Similarly, if this is ran, then a MAJOR error likely occurred.
+        print("\n❌ Failed to save successful rows to history table...")
+        print(f"Error: {err}")
+        sys.exit(1)
 
     # TODO: Reset columns to update them for next EPR due date
 
