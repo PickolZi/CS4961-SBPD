@@ -165,6 +165,7 @@ def main():
         print(f"Error: {err}")
         sys.exit(1)
 
+
     # Get rows by status == "Saving to Box"
     try:
         filtered_rows = get_rows_awaiting_saving(smartsheet_client=smartsheet_client, sheet_id=SHEET_ID)
@@ -177,11 +178,29 @@ def main():
         print(f"Error: {err}")
         sys.exit(1)
 
-    # TODO: Send/save EPR attachment(s) to Box
-    print(f"Sending {len(filtered_rows)} EPR attachment(s) to Box")
-    save_epr_attachments_to_box(smartsheet_client, filtered_rows, error_map)
+
+    # Send/save EPR attachment(s) to Box
+    try:
+        print(f"Sending {len(filtered_rows)} EPR attachment(s) to Box")
+        save_epr_attachments_to_box(smartsheet_client, filtered_rows, error_map)
+
+        if error_map:
+            print(f"🚧 ({len(error_map)} of {len(filtered_rows)}) EPRs had some errors. Sending errors to designated email... ")
+            # TODO: Write script to send a message to the designated email.
+        
+        if len(error_map) > 0 and len(error_map) == len(filtered_rows):
+            raise RuntimeError("Every single EPR has failed to save. Please contact this email... ")
+        
+    except Exception as err:
+        # If this is ran, then a MAJOR error occurred with possible side effects - attachments saved
+        # in Box but changes not reflected in Smartsheet.
+        print("❌ Failed to save attachments to Box...")
+        print(f"Error: {err}")
+        sys.exit(1)
+
 
     # TODO: Copy row to history records table in Smartsheet
+
 
     # TODO: Reset columns to update them for next EPR due date
 
