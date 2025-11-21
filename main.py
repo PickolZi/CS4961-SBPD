@@ -178,7 +178,7 @@ def copy_smartsheet_rows_to_history_table(smartsheet_client: Smartsheet, filtere
     """
     COPY_SMARTSHEET_ROW_ERROR_MESSAGE = "Row failed to be saved in the history table"
 
-    for row in filtered_rows:
+    for idx,row in enumerate(filtered_rows):
         row_id = row[0]["rowId"]
         first_name = row[4]["value"].upper()
         last_name = row[5]["value"].upper()
@@ -222,8 +222,12 @@ def copy_smartsheet_rows_to_history_table(smartsheet_client: Smartsheet, filtere
                 HISTORY_SHEET_ID,
                 [update_row]
             )
+
+            counter = f"{idx+1}/{len(filtered_rows)}"
+            print(f"✅ ({counter}) Row successfully copied to history table for {first_name} {last_name}")
         except Exception as err:
-            print(f"🚧 Error saving row to history table for {first_name} {last_name}")
+            counter = f"{idx+1}/{len(filtered_rows)}"
+            print(f"🚧 ({counter}) Error saving row to history table for {first_name} {last_name}")
             error_map[row_id].append(COPY_SMARTSHEET_ROW_ERROR_MESSAGE)
         
 def reset_columns_for_next_epr_due_date(smartsheet_client: Smartsheet, filtered_rows: list, error_map: dict):
@@ -257,7 +261,7 @@ def reset_columns_for_next_epr_due_date(smartsheet_client: Smartsheet, filtered_
     STATUS_NOT_CREATED = "Not Created"
 
 
-    for row in filtered_rows:
+    for idx,row in enumerate(filtered_rows):
         row_id = row[0]["rowId"]
 
         # We don't want to update rows that previously have had ANY errors.
@@ -401,22 +405,23 @@ def reset_columns_for_next_epr_due_date(smartsheet_client: Smartsheet, filtered_
             # Delete all attachments in the row
             attachments = smartsheet_client.Attachments.list_row_attachments(SHEET_ID, row_id).data
             for attachment in attachments:
-                print(f"\tattachment: {attachment.name} successfully deleted")
+                print(f"  attachment: {attachment.name} successfully deleted")
                 smartsheet_client.Attachments.delete_attachment(SHEET_ID, attachment.id)
 
             smartsheet_client.Sheets.update_rows(SHEET_ID, [row_to_update])
-            print(f"✅ Successfully reset row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
+            counter = f"{idx+1}/{len(filtered_rows)}"
+            print(f"✅ ({counter}) Successfully reset row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
         except Exception as err:
-            print(f"🚧 Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
-            print(err)
+            print(f"🚧 ({counter}) Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
             error_map[row_id].append(RESETTING_SMARTSHEET_ROW_ERROR_MESSAGE)
 
 
 def main():
     # Get Smartsheet Client
     try:
-        print(f"Fetching Smartsheet Client...\n")
+        print(f"🤖 Fetching Smartsheet Client...")
         smartsheet_client = get_smartsheet_client(access_token=SMARTSHEET_ACCESS_TOKEN)
+        print(f"Successfully found a valid Smartsheet Client...")
     except RuntimeError as err:
         print("\n❌ Failed to fetch smartsheet client...")
         print(f"Error: {err}")
@@ -437,7 +442,7 @@ def main():
 
     # Send/save EPR attachment(s) to Box
     try:
-        print(f"Sending {len(filtered_rows)} EPR attachment(s) to Box")
+        print(f"📦 Saving {len(filtered_rows)} EPR attachment(s) to Box")
         save_epr_attachments_to_box(smartsheet_client, filtered_rows, error_map)
 
         if error_map:
@@ -446,7 +451,9 @@ def main():
         
         if len(error_map) > 0 and len(error_map) == len(filtered_rows):
             raise RuntimeError("Every single EPR has failed to save. Please contact this email... ")
-        
+
+        successful_epr_count = len(filtered_rows) - len(error_map)
+        print(f"Successfully saved {successful_epr_count} EPRs to Box...\n")
     except Exception as err:
         # If this is ran, then a MAJOR error occurred with possible side effects - attachments saved
         # in Box but changes not reflected in Smartsheet.
@@ -457,26 +464,30 @@ def main():
 
     # Copy row to history records table in Smartsheet
     try:
-        successful_epr_count = len(filtered_rows) - len(error_map)
-        print(f"Copying {successful_epr_count} successful rows to the history records table...")
+        print(f"💽 Copying {successful_epr_count} rows to the history records table...")
         copy_smartsheet_rows_to_history_table(smartsheet_client, filtered_rows, error_map)
 
         if len(error_map) > 0 and len(error_map) == len(filtered_rows):
             raise RuntimeError("Every single row failed to save to history map. Please contact this email... ")
+        
+        successful_epr_count = len(filtered_rows) - len(error_map)
+        print(f"Successfully saved {successful_epr_count} rows to the history records table...\n")
     except Exception as err:
         # Similarly, if this is ran, then a MAJOR error likely occurred.
-        print("\n❌ Failed to save successful rows to history table...")
+        print("\n❌ Failed to save rows to history table...")
         print(f"Error: {err}")
         sys.exit(1)
         
     # Reset rows to prepare for next EPR
     try:
-        successful_epr_count = len(filtered_rows) - len(error_map)
-        print(f"Resetting {successful_epr_count} rows, preparing them for their next EPR due date...")
+        print(f"🧼 Resetting {successful_epr_count} rows, preparing them for their next EPR due date...")
         reset_columns_for_next_epr_due_date(smartsheet_client, filtered_rows, error_map)
 
         if len(error_map) > 0 and len(error_map) == len(filtered_rows):
             raise RuntimeError("Every single row failed to reset for their next EPR due date. Please contact this email... ")
+        
+        successful_epr_count = len(filtered_rows) - len(error_map)
+        print(f"Successfully reset {successful_epr_count} rows for their next EPR due date...")
     except Exception as err:
         print("\n❌ Failed to reset successful rows for their next EPR due date...")
         print(f"Error: {err}")
