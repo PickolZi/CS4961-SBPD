@@ -25,8 +25,8 @@ Requirements:
 - Smartsheet API Key (Can be created in Apps & Integrations)
 """
 
-SHEET_ID = 2580213150994308
-HISTORY_SHEET_ID = 1945788230881156
+SHEET_ID = 2190844477001604
+HISTORY_SHEET_ID = 8040061653176196
 error_map = defaultdict(list)  # Will email to someone to fix manually
 """
 error_map = {
