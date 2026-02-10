@@ -5,13 +5,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from box_sdk_gen import BoxClient, BoxDeveloperTokenAuth
-from box_sdk_gen.internal.utils import ByteStream
-from box_sdk_gen.managers.uploads import UploadFileAttributes, UploadFileAttributesParentField
-from box_sdk_gen.box.errors import BoxAPIError, BoxSDKError
-from box_sdk_gen.schemas import FolderFull, FileFull
+from box_sdk_gen.box.errors import BoxSDKError
 
-from models import BoxFolder, BoxFile
+from models import BoxFolder, BoxFile, SmartsheetContact
 from boxnote_to_html_parser.html_parser import convert_boxnote_to_html
+from email_manager import EmailManager
 
 """
 Separations Script.
@@ -65,6 +63,27 @@ def download_attachments_and_email_template_from_box(box_client: BoxClient):
     email_template_html_output_path = BOX_SYNC_PATH / Path("email_template") / Path(email_template_html_filename)
     convert_boxnote_to_html(email_template_boxnote_output_path, BOX_DEVELOPER_TOKEN, email_template_html_output_path)
 
+def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]):
+    # Read email template
+    # FIXME: Refactor into global variables
+    email_attachments_path = Path.cwd() / Path("_box_sync") / Path("attachments")
+    email_template_path = Path.cwd() / Path("_box_sync") / Path("email_template") / Path("email_template.html")
+    email_template: str = ""
+    with open(email_template_path, "r", encoding='utf-8') as f:
+        email_template = f.read()
+
+    email_manager = EmailManager("smtp.gmail.com", 587, "pickol876@gmail.com", os.environ['GMAIL_APP_PASSWORD'])
+    subject = f"SBPD - Separation Information"
+
+    for idx, contact in enumerate(contacts):
+        counter = f"{idx+1}/{len(contacts)}"
+        try:
+            print(f"  ({counter}) Sending separation email to: {contact.email}")
+            email_manager.send_email(contact.email, subject, None, email_template, email_attachments_path)
+        except Exception as e:
+            # TODO: error map to keep track of failed emails
+            print(f"  ({counter}) Failed to send an email to: {contact.email}")
+        
 
 def main():
     # Get Smartsheet and Box client
@@ -93,14 +112,17 @@ def main():
         sys.exit(1)
 
     # HACK: TEMPORARY CONTACTS INSTEAD OF FETCHING FROM SMARTSHEET
-    separating_contacts = ["pickol876@gmail.com", "james2022.college@gmail.com"]
-    # Email separating contacts with filled in email templates and attachments
-    # try:
-    #     print(f"Emailing {len(separating_contacts)} contacts...")
-    #     print("Finished emailing all separating contacts.")
-    # except Exception as e:
-    #     print(f"❌ Error: {e}")
-    #     sys.exit(1)
+    contacts: list[SmartsheetContact] = []
+    contacts.append(SmartsheetContact("james", "san", "james2022.college@gmail.com"))
+    contacts.append(SmartsheetContact("emilia", "gudenberg", "pickol876@gmail.com"))
+    # Email contacts with filled in email templates and attachments
+    try:
+        print(f"Emailing {len(contacts)} contacts...")
+        send_customized_emails_and_attachments(contacts)
+        print("Finished emailing contacts.")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
