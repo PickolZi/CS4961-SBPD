@@ -4,6 +4,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+import smartsheet
+from smartsheet.smartsheet import Smartsheet
+from smartsheet.models.attachment import Attachment
+from smartsheet.models.index_result import IndexResult
+from smartsheet.models import Sheet
+
 from box_sdk_gen import BoxClient, BoxDeveloperTokenAuth
 from box_sdk_gen.box.errors import BoxSDKError
 
@@ -31,6 +37,7 @@ load_dotenv()
 # Note: Developer tokens expire after 60 minutes
 # TODO: Need paid plan to create an App token that DOESN'T EXPIRE
 BOX_DEVELOPER_TOKEN = os.getenv("BOX_ACCESS_TOKEN", "")
+SMARTSHEET_ACCESS_TOKEN = os.getenv("SMARTSHEET_ACCESS_TOKEN", "")
 
 # Paths
 BOX_SYNC_FOLDER_PATH: Path = Path.cwd() / Path("_box_sync")
@@ -41,6 +48,28 @@ EMAIL_TEMPLATE_HTML_FILENAME = "email_template.html"
 EMAIL_TEMPLATE_BOXNOTE_PATH = BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH / Path(EMAIL_TEMPLATE_BOXNOTE_FILENAME)
 EMAIL_TEMPLATE_HTML_PATH = BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH / Path(EMAIL_TEMPLATE_HTML_FILENAME)
 
+
+def get_smartsheet_client(access_token: str) -> Smartsheet:
+    """
+    Fetch Smartsheet client
+    
+    Args:
+        access_token: API token from Smartsheet
+    
+    Returns:
+        Smartsheet object or raise Smartsheet Error
+    """
+    
+    smartsheet_client = smartsheet.Smartsheet(access_token=SMARTSHEET_ACCESS_TOKEN)
+
+    # Test API call because no error is thrown when connection fails.
+    response:IndexResult = smartsheet_client.Sheets.list_sheets()
+    if type(response) == smartsheet.models.error.Error:
+        err_code = response.result.error_code
+        err_message = response.result.message
+        raise RuntimeError(err_message)
+
+    return smartsheet_client
 
 def download_attachments_and_email_template_from_box(box_client: BoxClient):
     IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID = "364698186466"
@@ -125,11 +154,15 @@ def delete_attachments_and_email_templates():
 def main():
     # Get Smartsheet and Box client
     try:
-        print(f"Fetching API clients...")
+        print(f"Fetching Smartsheet client...")
+        smartsheet_client = get_smartsheet_client(access_token=SMARTSHEET_ACCESS_TOKEN)
+        print(f"✅ Successfully fetched Smartsheet client")
+
+        print(f"Fetching Box client...")
         auth: BoxDeveloperTokenAuth = BoxDeveloperTokenAuth(token=BOX_DEVELOPER_TOKEN)
-        client: BoxClient = BoxClient(auth=auth)
-        client.folders.get_folder_by_id('0')  # Runs to ensure credentials are valid.
-        print(f"✅ Successfully fetched API clients")
+        box_client: BoxClient = BoxClient(auth=auth)
+        box_client.folders.get_folder_by_id('0')  # Runs to ensure credentials are valid.
+        print(f"✅ Successfully fetched Box client")
     except BoxSDKError as e:
         print(f"❌ Error: {e.message}")
         print(f"Please refresh Box.com API Developer Token.")
@@ -144,7 +177,7 @@ def main():
     # Downloading attachments and email template from Box.com
     try:
         print(f"\nDownloading attachments and email template from Box.com...")
-        download_attachments_and_email_template_from_box(client)
+        download_attachments_and_email_template_from_box(box_client)
         print("✅ Successfully downloaded attachments and email template from Box.com.")
     except Exception as e:
         print(f"❌ Error: {e}")
