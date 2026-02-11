@@ -1,7 +1,7 @@
 import sys
 import os
 from pathlib import Path
-
+from typing import List
 from dotenv import load_dotenv
 
 import smartsheet
@@ -39,7 +39,7 @@ load_dotenv()
 BOX_DEVELOPER_TOKEN = os.getenv("BOX_ACCESS_TOKEN", "")
 SMARTSHEET_ACCESS_TOKEN = os.getenv("SMARTSHEET_ACCESS_TOKEN", "")
 
-# Paths
+# Box constants
 BOX_SYNC_FOLDER_PATH: Path = Path.cwd() / Path("_box_sync")
 BOX_SYNC_ATTACHMENTS_FOLDER_PATH = BOX_SYNC_FOLDER_PATH / Path("attachments")
 BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH = BOX_SYNC_FOLDER_PATH / Path("email_template")
@@ -48,6 +48,14 @@ EMAIL_TEMPLATE_HTML_FILENAME = "email_template.html"
 EMAIL_TEMPLATE_BOXNOTE_PATH = BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH / Path(EMAIL_TEMPLATE_BOXNOTE_FILENAME)
 EMAIL_TEMPLATE_HTML_PATH = BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH / Path(EMAIL_TEMPLATE_HTML_FILENAME)
 
+# Smartsheet Constants
+SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID = "cr49HR94P7xHvWC3cQ7RfC6fQWmcxv8qvpxwqR21"
+SMARTSHEET_EMAIL_AWAITING_EMAIL_STATUS = "awaiting email"
+SMARTSHEET_REQUIRED_COLUMN_TITLES_MAP = {
+    3592840163315588: "email_status",
+    6495241300037508: "email",
+    4169898010562436: "last_day_date"
+}
 
 def get_smartsheet_client(access_token: str) -> Smartsheet:
     """
@@ -70,6 +78,40 @@ def get_smartsheet_client(access_token: str) -> Smartsheet:
         raise RuntimeError(err_message)
 
     return smartsheet_client
+
+def retrieve_separating_contacts_from_smartsheet(smartsheet_client: Smartsheet) -> List[SmartsheetContact]:
+    filtered_smartsheet_separating_contacts = list()
+    res: Sheet = smartsheet_client.Sheets.get_sheet(sheet_id=SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID)
+    smartsheet_json: dict = res.to_dict()
+
+    # TODO: Add null checks
+    smartsheet_extra_column_titles_map = {}
+    for column_header in smartsheet_json.get("columns", []):
+        column_id = column_header.get("id")
+        column_title = column_header.get("title")
+        smartsheet_extra_column_titles_map[column_id] = column_title
+
+    contact_dict = {}
+    for row in smartsheet_json.get("rows", []):
+        for cell in row.get("cells", []):
+            cell_id = cell.get("columnId")
+            cell_value = cell.get("value")
+
+            if cell_id in SMARTSHEET_REQUIRED_COLUMN_TITLES_MAP:
+                contact_dict[SMARTSHEET_REQUIRED_COLUMN_TITLES_MAP[cell_id]] = cell_value  # SmartsheetContact must have these 3 attributes for its model
+            contact_dict[smartsheet_extra_column_titles_map[cell_id]] = cell_value     # Every other additional column they add in smartsheet
+        
+        # These 3 attributes must exist
+        email_status = contact_dict.get("email_status")
+        email = contact_dict.get("email")
+        last_day_date = contact_dict.get("last_day_date")
+        if not (email_status and email and last_day_date):
+            raise Exception("row missing crucial cell data.")  # TODO: error handling
+
+        contact: SmartsheetContact = SmartsheetContact(**contact_dict)
+        filtered_smartsheet_separating_contacts.append(contact)
+    
+    return filtered_smartsheet_separating_contacts
 
 def download_attachments_and_email_template_from_box(box_client: BoxClient):
     IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID = "364698186466"
@@ -155,10 +197,10 @@ def main():
     # Get Smartsheet and Box client
     try:
         print(f"Fetching Smartsheet client...")
-        smartsheet_client = get_smartsheet_client(access_token=SMARTSHEET_ACCESS_TOKEN)
+        smartsheet_client: Smartsheet = get_smartsheet_client(access_token=SMARTSHEET_ACCESS_TOKEN)
         print(f"✅ Successfully fetched Smartsheet client")
 
-        print(f"Fetching Box client...")
+        print(f"\nFetching Box client...")
         auth: BoxDeveloperTokenAuth = BoxDeveloperTokenAuth(token=BOX_DEVELOPER_TOKEN)
         box_client: BoxClient = BoxClient(auth=auth)
         box_client.folders.get_folder_by_id('0')  # Runs to ensure credentials are valid.
@@ -170,10 +212,17 @@ def main():
 
     # TODO: Fetch contacts from Smartsheet and filter by new separating employees
     try:
-        pass
+        print(f"\nRetrieving separating employees from Smartsheet...")
+        smartsheet_separating_contacts = retrieve_separating_contacts_from_smartsheet(smartsheet_client)
+        filtered_smartsheet_separating_contacts = list(filter(lambda contact: contact.email_status.lower() == SMARTSHEET_EMAIL_AWAITING_EMAIL_STATUS, smartsheet_separating_contacts))
+        print(f"✅ Successfully retrieved separating employees from Smartsheet.")
+        if len(filtered_smartsheet_separating_contacts) == 0:
+            print(f"There are no employees who are waiting for their automated email.")
+            sys.exit(1)
     except Exception as e:
-        pass
-
+        print(f"error: {e}")
+        print(f"❌ Failed to retrieve separating employees from Smartsheet.")
+    
     # Downloading attachments and email template from Box.com
     try:
         print(f"\nDownloading attachments and email template from Box.com...")
@@ -183,14 +232,10 @@ def main():
         print(f"❌ Error: {e}")
         sys.exit(1)
 
-    # HACK: TEMPORARY CONTACTS INSTEAD OF FETCHING FROM SMARTSHEET
-    contacts: list[SmartsheetContact] = []
-    contacts.append(SmartsheetContact("james", "san", "james2022.college@gmail.com"))
-    contacts.append(SmartsheetContact("emilia", "gudenberg", "pickol876@gmail.com"))
     # Email contacts with filled in email templates and attachments
     try:
-        print(f"\nEmailing {len(contacts)} contacts...")
-        send_customized_emails_and_attachments(contacts)
+        print(f"\nEmailing {len(filtered_smartsheet_separating_contacts)} contacts...")
+        send_customized_emails_and_attachments(filtered_smartsheet_separating_contacts)
         print("✅ Finished emailing contact(s).")
     except Exception as e:
         print(f"❌ Error: {e}")
