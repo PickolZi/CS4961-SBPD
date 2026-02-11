@@ -46,23 +46,38 @@ def download_attachments_and_email_template_from_box(box_client: BoxClient):
     IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID = "364698186466"
     EMAIL_TEMPLATE_ID = "2126258145331"
 
+    # Ensure proper _box_sync folder structure exists, if not, create it.
+    if not BOX_SYNC_FOLDER_PATH.exists():
+        print(f"  {BOX_SYNC_FOLDER_PATH} does not exist. Creating it now...")
+        BOX_SYNC_FOLDER_PATH.mkdir()
+    if not BOX_SYNC_ATTACHMENTS_FOLDER_PATH.exists():
+        print(f"  {BOX_SYNC_ATTACHMENTS_FOLDER_PATH} does not exist. Creating it now...")
+        BOX_SYNC_ATTACHMENTS_FOLDER_PATH.mkdir()
+    if not BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH.exists():
+        print(f"  {BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH} does not exist. Creating it now...")
+        BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH.mkdir()
+
     # Save attachments metadata from Box.com
     box_attachments_folder: BoxFolder = BoxFolder(IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID)
     for entry in box_client.folders.get_folder_items(IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID).entries:
         box_file: BoxFile = BoxFile(entry.id, entry.name, entry.file_version.id, entry.sha_1)
         box_attachments_folder.contents.append(box_file)
 
-    # TODO check if attachments latest version already exists, if so, don't download and remove attachments no longer needed.
-    for box_file in box_attachments_folder.contents:
+    # FEATURE: Instead of constantly re-downloading attachments and email template, we can have a manifest.json to save the id and etag of our previous version and only pull from Box.com when the manifest.json files change.
+    for idx, box_file in enumerate(box_attachments_folder.contents):
+        counter = f"({idx+1}/{len(box_attachments_folder.contents)})"
         box_attachment_path = BOX_SYNC_ATTACHMENTS_FOLDER_PATH / Path(box_file.name)
         with open(box_attachment_path, "wb") as f:
+            print(f"  {counter} Downloading Box attachment to: {box_attachment_path}")
             box_client.downloads.download_file_to_output_stream(box_file.id, f)  # Downloads each Box.com attachment
 
     # Download email template(.boxnote extension)
     with open(EMAIL_TEMPLATE_BOXNOTE_PATH, "wb") as f:
+        print(f"  Downloading email attachment to: {EMAIL_TEMPLATE_BOXNOTE_PATH}")
         box_client.downloads.download_file_to_output_stream(EMAIL_TEMPLATE_ID, f)  # Downloads Box.com email_template(.boxnote)
 
     # TODO: Look over image converting from boxnote to html as that might be broken/is untested.
+    print(f"  Converting email template from HTML format: {EMAIL_TEMPLATE_HTML_PATH}")
     convert_boxnote_to_html(EMAIL_TEMPLATE_BOXNOTE_PATH, BOX_DEVELOPER_TOKEN, EMAIL_TEMPLATE_HTML_PATH)
 
 def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]):
@@ -74,7 +89,7 @@ def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]):
         raise Exception("HTML Email template could not be found.")
 
     email_manager = EmailManager("smtp.gmail.com", 587, "pickol876@gmail.com", os.environ['GMAIL_APP_PASSWORD'])
-    subject = f"SBPD - Separation Information"
+    subject = f"SBPD - Separation Information email IMPORTANT!"
 
     for idx, contact in enumerate(contacts):
         counter = f"{idx+1}/{len(contacts)}"
@@ -86,13 +101,35 @@ def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]):
             # TODO: error map to keep track of failed emails
             print(f"  ({counter}) Failed to send an email to: {contact.email}")
         
+def delete_attachments_and_email_templates():
+    if not BOX_SYNC_FOLDER_PATH.exists():
+        raise Exception("_box_sync folder does not exist when it should.")
+
+    if not BOX_SYNC_ATTACHMENTS_FOLDER_PATH.exists():
+        raise Exception("_box_sync/attachments folder does not exist when it should.")
+    
+    if not BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH.exists():
+        raise Exception("_box_sync/attachments folder does not exist when it should.")
+    
+    for filename in os.listdir(BOX_SYNC_ATTACHMENTS_FOLDER_PATH):
+        filepath = os.path.join(BOX_SYNC_ATTACHMENTS_FOLDER_PATH, filename)
+        print(f"  removing file: {filepath}")
+        os.remove(filepath)
+    
+    for filename in os.listdir(BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH):
+        filepath = os.path.join(BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH, filename)
+        print(f"  removing file: {filepath}")
+        os.remove(filepath)
+
 
 def main():
     # Get Smartsheet and Box client
     try:
+        print(f"Fetching API clients...")
         auth: BoxDeveloperTokenAuth = BoxDeveloperTokenAuth(token=BOX_DEVELOPER_TOKEN)
         client: BoxClient = BoxClient(auth=auth)
         client.folders.get_folder_by_id('0')  # Runs to ensure credentials are valid.
+        print(f"✅ Successfully fetched API clients")
     except BoxSDKError as e:
         print(f"❌ Error: {e.message}")
         print(f"Please refresh Box.com API Developer Token.")
@@ -106,7 +143,7 @@ def main():
 
     # Downloading attachments and email template from Box.com
     try:
-        print(f"Downloading attachments and email template from Box.com...")
+        print(f"\nDownloading attachments and email template from Box.com...")
         download_attachments_and_email_template_from_box(client)
         print("✅ Successfully downloaded attachments and email template from Box.com.")
     except Exception as e:
@@ -119,13 +156,21 @@ def main():
     contacts.append(SmartsheetContact("emilia", "gudenberg", "pickol876@gmail.com"))
     # Email contacts with filled in email templates and attachments
     try:
-        print(f"Emailing {len(contacts)} contacts...")
+        print(f"\nEmailing {len(contacts)} contacts...")
         send_customized_emails_and_attachments(contacts)
-        print("Finished emailing contacts.")
+        print("✅ Finished emailing contact(s).")
     except Exception as e:
         print(f"❌ Error: {e}")
         sys.exit(1)
 
+    # Deletes all attachments and email templates to revert to original state
+    try:
+        print(f"\nCleaning up files...")
+        delete_attachments_and_email_templates()
+        print(f"✅ Succesfully cleaned up all files.")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
