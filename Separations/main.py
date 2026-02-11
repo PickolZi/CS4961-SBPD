@@ -32,45 +32,46 @@ load_dotenv()
 # TODO: Need paid plan to create an App token that DOESN'T EXPIRE
 BOX_DEVELOPER_TOKEN = os.getenv("BOX_ACCESS_TOKEN", "")
 
+# Paths
+BOX_SYNC_FOLDER_PATH: Path = Path.cwd() / Path("_box_sync")
+BOX_SYNC_ATTACHMENTS_FOLDER_PATH = BOX_SYNC_FOLDER_PATH / Path("attachments")
+BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH = BOX_SYNC_FOLDER_PATH / Path("email_template")
+EMAIL_TEMPLATE_BOXNOTE_FILENAME = "email_template.boxnote"
+EMAIL_TEMPLATE_HTML_FILENAME = "email_template.html"
+EMAIL_TEMPLATE_BOXNOTE_PATH = BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH / Path(EMAIL_TEMPLATE_BOXNOTE_FILENAME)
+EMAIL_TEMPLATE_HTML_PATH = BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH / Path(EMAIL_TEMPLATE_HTML_FILENAME)
+
 
 def download_attachments_and_email_template_from_box(box_client: BoxClient):
     IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID = "364698186466"
     EMAIL_TEMPLATE_ID = "2126258145331"
-    BOX_SYNC_PATH: Path = Path.cwd() / Path("_box_sync")
 
-    # Download attachments from Box.com
-    box_attachments_folder: BoxFolder = BoxFolder(id=IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID)
+    # Save attachments metadata from Box.com
+    box_attachments_folder: BoxFolder = BoxFolder(IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID)
     for entry in box_client.folders.get_folder_items(IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID).entries:
         box_file: BoxFile = BoxFile(entry.id, entry.name, entry.file_version.id, entry.sha_1)
         box_attachments_folder.contents.append(box_file)
 
     # TODO check if attachments latest version already exists, if so, don't download and remove attachments no longer needed.
-    box_attachments_path = BOX_SYNC_PATH / Path("attachments")
     for box_file in box_attachments_folder.contents:
-        box_attachment_output_path = box_attachments_path / Path(box_file.name)
-        with open(box_attachment_output_path, "wb") as f:
-            box_client.downloads.download_file_to_output_stream(box_file.id, f)
+        box_attachment_path = BOX_SYNC_ATTACHMENTS_FOLDER_PATH / Path(box_file.name)
+        with open(box_attachment_path, "wb") as f:
+            box_client.downloads.download_file_to_output_stream(box_file.id, f)  # Downloads each Box.com attachment
 
     # Download email template(.boxnote extension)
-    email_template_boxnote_filename = "email_template.boxnote"
-    email_template_boxnote_output_path = BOX_SYNC_PATH / Path("email_template") / Path(email_template_boxnote_filename)
-    with open(email_template_boxnote_output_path, "wb") as f:
-        box_client.downloads.download_file_to_output_stream(EMAIL_TEMPLATE_ID, f)
+    with open(EMAIL_TEMPLATE_BOXNOTE_PATH, "wb") as f:
+        box_client.downloads.download_file_to_output_stream(EMAIL_TEMPLATE_ID, f)  # Downloads Box.com email_template(.boxnote)
 
     # TODO: Look over image converting from boxnote to html as that might be broken/is untested.
-    # Convert email template from boxnote to html
-    email_template_html_filename = "email_template.html"
-    email_template_html_output_path = BOX_SYNC_PATH / Path("email_template") / Path(email_template_html_filename)
-    convert_boxnote_to_html(email_template_boxnote_output_path, BOX_DEVELOPER_TOKEN, email_template_html_output_path)
+    convert_boxnote_to_html(EMAIL_TEMPLATE_BOXNOTE_PATH, BOX_DEVELOPER_TOKEN, EMAIL_TEMPLATE_HTML_PATH)
 
 def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]):
     # Read email template
-    # FIXME: Refactor into global variables
-    email_attachments_path = Path.cwd() / Path("_box_sync") / Path("attachments")
-    email_template_path = Path.cwd() / Path("_box_sync") / Path("email_template") / Path("email_template.html")
-    email_template: str = ""
-    with open(email_template_path, "r", encoding='utf-8') as f:
+    with open(EMAIL_TEMPLATE_HTML_PATH, "r", encoding='utf-8') as f:
         email_template = f.read()
+
+    if not email_template:
+        raise Exception("HTML Email template could not be found.")
 
     email_manager = EmailManager("smtp.gmail.com", 587, "pickol876@gmail.com", os.environ['GMAIL_APP_PASSWORD'])
     subject = f"SBPD - Separation Information"
@@ -79,7 +80,8 @@ def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]):
         counter = f"{idx+1}/{len(contacts)}"
         try:
             print(f"  ({counter}) Sending separation email to: {contact.email}")
-            email_manager.send_email(contact.email, subject, None, email_template, email_attachments_path)
+            # TODO: Inject custom user data into email template
+            email_manager.send_email(contact.email, subject, None, email_template, BOX_SYNC_ATTACHMENTS_FOLDER_PATH)
         except Exception as e:
             # TODO: error map to keep track of failed emails
             print(f"  ({counter}) Failed to send an email to: {contact.email}")
