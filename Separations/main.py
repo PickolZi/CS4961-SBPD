@@ -17,6 +17,8 @@ from models import BoxFolder, BoxFile, SmartsheetContact
 from boxnote_to_html_parser.html_parser import convert_boxnote_to_html
 from email_manager import EmailManager
 
+from helpers.regex import replace_email_template_placeholders
+
 """
 Separations Script.
 1. Read Smartsheet and filter for employees departing from SBPD
@@ -166,8 +168,8 @@ def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]):
         counter = f"{idx+1}/{len(contacts)}"
         try:
             print(f"  ({counter}) Sending separation email to: {contact.email}")
-            # TODO: Inject custom user data into email template
-            email_manager.send_email(contact.email, subject, None, email_template, BOX_SYNC_ATTACHMENTS_FOLDER_PATH)
+            custom_email = replace_email_template_placeholders(email_template, contact)
+            email_manager.send_email(contact.email, subject, None, custom_email, BOX_SYNC_ATTACHMENTS_FOLDER_PATH)
         except Exception as e:
             # TODO: error map to keep track of failed emails
             print(f"  ({counter}) Failed to send an email to: {contact.email}")
@@ -210,7 +212,6 @@ def main():
         print(f"Please refresh Box.com API Developer Token.")
         sys.exit(1)
 
-    # TODO: Fetch contacts from Smartsheet and filter by new separating employees
     try:
         print(f"\nRetrieving separating employees from Smartsheet...")
         smartsheet_separating_contacts = retrieve_separating_contacts_from_smartsheet(smartsheet_client)
