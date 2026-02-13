@@ -53,6 +53,8 @@ EMAIL_TEMPLATE_HTML_PATH = BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH / Path(EMAIL_TEMP
 # Smartsheet Constants
 SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID = "cr49HR94P7xHvWC3cQ7RfC6fQWmcxv8qvpxwqR21"
 SMARTSHEET_EMAIL_AWAITING_EMAIL_STATUS = "awaiting email"
+SMARTSHEET_EMAIL_EMAIL_SENT_STATUS = "email sent"
+SMARTSHEET_COLUMN_EMAIL_STATUS_ID = 3592840163315588
 SMARTSHEET_REQUIRED_COLUMN_TITLES_MAP = {
     3592840163315588: "email_status",
     6495241300037508: "email",
@@ -109,6 +111,7 @@ def retrieve_separating_contacts_from_smartsheet(smartsheet_client: Smartsheet) 
         last_day_date = contact_dict.get("last_day_date")
         if not (email_status and email and last_day_date):
             raise Exception("row missing crucial cell data.")  # TODO: error handling
+        contact_dict["smartsheet_row_id"] = row.get("id")
 
         contact: SmartsheetContact = SmartsheetContact(**contact_dict)
         filtered_smartsheet_separating_contacts.append(contact)
@@ -153,7 +156,10 @@ def download_attachments_and_email_template_from_box(box_client: BoxClient):
     print(f"  Converting email template from HTML format: {EMAIL_TEMPLATE_HTML_PATH}")
     convert_boxnote_to_html(EMAIL_TEMPLATE_BOXNOTE_PATH, BOX_DEVELOPER_TOKEN, EMAIL_TEMPLATE_HTML_PATH)
 
-def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]):
+def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]) -> List[List[SmartsheetContact]]:
+    separating_contacts_success_list: list[SmartsheetContact] = list()
+    separating_contacts_failed_list: list[SmartsheetContact] = list()
+
     # Read email template
     with open(EMAIL_TEMPLATE_HTML_PATH, "r", encoding='utf-8') as f:
         email_template = f.read()
@@ -170,9 +176,13 @@ def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]):
             print(f"  ({counter}) Sending separation email to: {contact.email}")
             custom_email = replace_email_template_placeholders(email_template, contact)
             email_manager.send_email(contact.email, subject, None, custom_email, BOX_SYNC_ATTACHMENTS_FOLDER_PATH)
+            separating_contacts_success_list.append(contact)
         except Exception as e:
             # TODO: error map to keep track of failed emails
             print(f"  ({counter}) Failed to send an email to: {contact.email}")
+            separating_contacts_failed_list.append(contact)
+    
+    return [separating_contacts_success_list, separating_contacts_failed_list]
         
 def delete_attachments_and_email_templates():
     if not BOX_SYNC_FOLDER_PATH.exists():
@@ -193,6 +203,20 @@ def delete_attachments_and_email_templates():
         filepath = os.path.join(BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH, filename)
         print(f"  removing file: {filepath}")
         os.remove(filepath)
+
+def update_separation_contacts_to_email_sent(smartsheet_client: Smartsheet, contacts: list[SmartsheetContact]):
+    new_cell = smartsheet.models.Cell()
+    new_cell.column_id = SMARTSHEET_COLUMN_EMAIL_STATUS_ID
+    new_cell.value = SMARTSHEET_EMAIL_EMAIL_SENT_STATUS
+
+    rows_to_update: List[smartsheet.models.Row] = list()
+    for contact in contacts:
+        row = smartsheet.models.Row()
+        row.id = contact.smartsheet_row_id
+        row.cells.append(new_cell)
+        rows_to_update.append(row)
+
+    response = smartsheet_client.Sheets.update_rows(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID, rows_to_update)
 
 
 def main():
@@ -223,7 +247,7 @@ def main():
     except Exception as e:
         print(f"error: {e}")
         print(f"❌ Failed to retrieve separating employees from Smartsheet.")
-    
+
     # Downloading attachments and email template from Box.com
     try:
         print(f"\nDownloading attachments and email template from Box.com...")
@@ -236,10 +260,21 @@ def main():
     # Email contacts with filled in email templates and attachments
     try:
         print(f"\nEmailing {len(filtered_smartsheet_separating_contacts)} contacts...")
-        send_customized_emails_and_attachments(filtered_smartsheet_separating_contacts)
+        separating_contacts_success_list, separating_contacts_failed_list = \
+            send_customized_emails_and_attachments(filtered_smartsheet_separating_contacts)
         print("✅ Finished emailing contact(s).")
     except Exception as e:
         print(f"❌ Error: {e}")
+        sys.exit(1)
+
+    # Update Separation contacts status to 'email sent'
+    try:
+        print(f"\nUpdating Separation contacts status to 'email sent'...")
+        update_separation_contacts_to_email_sent(smartsheet_client, separating_contacts_success_list)
+        print(f"✅ Successfully updated Separation contacts.")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        print(f"Failed to update Smartsheet Separation contacts.")
         sys.exit(1)
 
     # Deletes all attachments and email templates to revert to original state

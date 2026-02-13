@@ -20,10 +20,11 @@ class BoxFolder:
         return f"<class 'models.BoxFolder'> {{'id': '{self.id}', 'contents': {self.contents}}}"
     
 class SmartsheetContact:
-    def __init__(self, email_status:str, email:str, last_day_date: date, **kwargs):
+    def __init__(self, email_status:str, email:str, last_day_date: date, smartsheet_row_id, **kwargs):
         self.email_status = email_status
         self.email = email
         self.last_day_date = last_day_date
+        self.smartsheet_row_id = smartsheet_row_id
 
         for k,v in kwargs.items():
             setattr(self,k,v)
