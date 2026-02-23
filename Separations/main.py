@@ -66,16 +66,7 @@ SMARTSHEET_REQUIRED_COLUMN_TITLES_MAP = {
 }
 
 def get_smartsheet_client(access_token: str) -> Smartsheet:
-    """
-    Fetch Smartsheet client
-    
-    Args:
-        access_token: API token from Smartsheet
-    
-    Returns:
-        Smartsheet object or raise Smartsheet Error
-    """
-    
+    logger.info(f"Fetching Smartsheet client...")
     smartsheet_client = smartsheet.Smartsheet(access_token=SMARTSHEET_ACCESS_TOKEN)
 
     # Test API call because no error is thrown when connection fails.
@@ -85,14 +76,32 @@ def get_smartsheet_client(access_token: str) -> Smartsheet:
         err_message = response.result.message
         raise RuntimeError(err_message)
 
+    logger.info(f"✅ Successfully fetched Smartsheet client")
     return smartsheet_client
 
+def get_box_client(box_developer_token: str) -> BoxClient:
+    logger.info(f"Fetching Box client...")
+
+    auth: BoxDeveloperTokenAuth = BoxDeveloperTokenAuth(token=box_developer_token)
+    box_client: BoxClient = BoxClient(auth=auth)
+
+    try:
+        box_client.folders.get_folder_by_id('0')  # Runs to ensure credentials are valid.
+    except BoxSDKError as e:
+        logger.error(f"Please refresh Box.com API Developer Token.")
+        raise
+
+    logger.info(f"✅ Successfully fetched Box client")
+    return box_client
+
 def retrieve_separating_contacts_from_smartsheet(smartsheet_client: Smartsheet) -> List[SmartsheetContact]:
+    logger.info(f"Retrieving separating employees from Smartsheet...")
+
     filtered_smartsheet_separating_contacts = list()
     res: Sheet = smartsheet_client.Sheets.get_sheet(sheet_id=SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID)
     smartsheet_json: dict = res.to_dict()
 
-    # TODO: Add null checks
+    # TODO: Add null checks AND error handling is really bad here. Really, come back and redo it soon. And in the main function part.
     smartsheet_extra_column_titles_map = {}
     for column_header in smartsheet_json.get("columns", []):
         column_id = column_header.get("id")
@@ -120,9 +129,12 @@ def retrieve_separating_contacts_from_smartsheet(smartsheet_client: Smartsheet) 
         contact: SmartsheetContact = SmartsheetContact(**contact_dict)
         filtered_smartsheet_separating_contacts.append(contact)
     
+    logger.info(f"✅ Successfully retrieved separating employees from Smartsheet.")
     return filtered_smartsheet_separating_contacts
 
 def download_attachments_and_email_template_from_box(box_client: BoxClient):
+    logger.info(f"Downloading attachments and email template from Box.com...")
+
     IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID = "364698186466"
     EMAIL_TEMPLATE_ID = "2126258145331"
 
@@ -161,7 +173,11 @@ def download_attachments_and_email_template_from_box(box_client: BoxClient):
     logger.info(f"  Converting email template from boxnote to HTML format...")
     convert_boxnote_to_html(EMAIL_TEMPLATE_BOXNOTE_PATH, BOX_DEVELOPER_TOKEN, EMAIL_TEMPLATE_HTML_PATH)
 
+    logger.info("✅ Successfully downloaded attachments and email template from Box.com.")
+
 def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]) -> List[List[SmartsheetContact]]:
+    logger.info(f"Emailing {len(contacts)} contacts...")
+
     separating_contacts_success_list: list[SmartsheetContact] = list()
     separating_contacts_failed_list: list[SmartsheetContact] = list()
 
@@ -187,9 +203,12 @@ def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]) ->
             logger.warning(f"  ({counter}) Failed to send an email to: {contact.email}")
             separating_contacts_failed_list.append(contact)
     
+    logger.info(f"✅ Successfully finished emailing {len(separating_contacts_success_list)}/{len(contacts)} contacts.")
     return [separating_contacts_success_list, separating_contacts_failed_list]
         
 def delete_attachments_and_email_templates():
+    logger.info(f"Cleaning up downloaded files...")
+
     if BOX_SYNC_FOLDER_PATH.exists():
         logger.info(f"  removing files from directory: {BOX_SYNC_FOLDER_PATH}")
     else:
@@ -211,7 +230,11 @@ def delete_attachments_and_email_templates():
     else:
         raise Exception("_box_sync/attachments folder does not exist when it should.")
 
+    logger.info(f"✅ Successfully cleaned up all downloaded files.")
+
 def update_separation_contacts_to_email_sent(smartsheet_client: Smartsheet, contacts: list[SmartsheetContact]):
+    logger.info(f"Updating Separation contacts status to 'email sent'...")
+
     new_cell = smartsheet.models.Cell()
     new_cell.column_id = SMARTSHEET_COLUMN_EMAIL_STATUS_ID
     new_cell.value = SMARTSHEET_EMAIL_EMAIL_SENT_STATUS
@@ -224,31 +247,22 @@ def update_separation_contacts_to_email_sent(smartsheet_client: Smartsheet, cont
         rows_to_update.append(row)
 
     response = smartsheet_client.Sheets.update_rows(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID, rows_to_update)
+    logger.info(f"✅ Successfully updated Separation contacts.")
 
 
 def main():
     # Get Smartsheet and Box client
     try:
-        logger.info(f"Fetching Smartsheet client...")
         smartsheet_client: Smartsheet = get_smartsheet_client(access_token=SMARTSHEET_ACCESS_TOKEN)
-        logger.info(f"✅ Successfully fetched Smartsheet client")
-
-        logger.info(f"Fetching Box client...")
-        auth: BoxDeveloperTokenAuth = BoxDeveloperTokenAuth(token=BOX_DEVELOPER_TOKEN)
-        box_client: BoxClient = BoxClient(auth=auth)
-        box_client.folders.get_folder_by_id('0')  # Runs to ensure credentials are valid.
-        logger.info(f"✅ Successfully fetched Box client")
-    except BoxSDKError as e:
-        logger.exception(f"❌ Please refresh Box.com API Developer Token.")
+        box_client: BoxClient = get_box_client(box_developer_token=BOX_DEVELOPER_TOKEN)
+    except Exception as e:
+        logger.exception(f"❌ Failed to fetch Smartsheet/Box.com SDK Client.")
         sys.exit(1)
-
+    
+    # Retrieve all separating contacts from Smartsheet
     try:
-        logger.info(f"Retrieving separating employees from Smartsheet...")
-
         smartsheet_separating_contacts = retrieve_separating_contacts_from_smartsheet(smartsheet_client)
         filtered_smartsheet_separating_contacts = list(filter(lambda contact: contact.email_status.lower() == SMARTSHEET_EMAIL_AWAITING_EMAIL_STATUS, smartsheet_separating_contacts))
-
-        logger.info(f"✅ Successfully retrieved separating employees from Smartsheet.")
 
         if len(filtered_smartsheet_separating_contacts) == 0:
             logger.info(f"There are no employees who are waiting for their automated email. Exiting program.")
@@ -259,37 +273,29 @@ def main():
 
     # Downloading attachments and email template from Box.com
     try:
-        logger.info(f"Downloading attachments and email template from Box.com...")
         download_attachments_and_email_template_from_box(box_client)
-        logger.info("✅ Successfully downloaded attachments and email template from Box.com.")
     except Exception as e:
         logger.exception(f"❌ Failed to download attachments and email template from Box.com.")
         sys.exit(1)
 
     # Email contacts with filled in email templates and attachments
     try:
-        logger.info(f"Emailing {len(filtered_smartsheet_separating_contacts)} contacts...")
         separating_contacts_success_list, separating_contacts_failed_list = \
             send_customized_emails_and_attachments(filtered_smartsheet_separating_contacts)
-        logger.info("✅ Finished emailing contact(s).")
     except Exception as e:
         logger.exception(f"❌ Failed to email contacts their attachments.")
         sys.exit(1)
 
     # Update Separation contacts status to 'email sent'
     try:
-        logger.info(f"Updating Separation contacts status to 'email sent'...")
         update_separation_contacts_to_email_sent(smartsheet_client, separating_contacts_success_list)
-        logger.info(f"✅ Successfully updated Separation contacts.")
     except Exception as e:
         logger.exception(f"❌ Failed to update Smartsheet Separation contacts.")
         sys.exit(1)
 
     # Deletes all attachments and email templates to revert to original state
     try:
-        logger.info(f"Cleaning up downloaded files...")
         delete_attachments_and_email_templates()
-        logger.info(f"✅ Succesfully cleaned up all downloaded files.")
     except Exception as e:
         logger.exception(f"❌ Failed to clean up downloaded files.")
         sys.exit(1)
