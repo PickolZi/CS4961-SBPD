@@ -14,7 +14,7 @@ from typing import Dict, List, Union
 
 from boxnote_to_html_parser import html_mapper
 
-log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+log_format = "%(asctime)s:[%(levelname)s]:%(message)s"
 logging.basicConfig(format=log_format, level=logging.INFO)
 logger = logging.getLogger()
 token = None

@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 from pathlib import Path
 from typing import List
 from dotenv import load_dotenv
@@ -34,6 +35,9 @@ Requirements:
 - GMAIL App Password (App password, not account password. Can be created here: https://myaccount.google.com/apppasswords)
 """
 
+logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
+logger = logging.getLogger("separations")
+logger.setLevel(logging.INFO)
 
 load_dotenv()
 # Note: Developer tokens expire after 60 minutes
@@ -124,13 +128,13 @@ def download_attachments_and_email_template_from_box(box_client: BoxClient):
 
     # Ensure proper _box_sync folder structure exists, if not, create it.
     if not BOX_SYNC_FOLDER_PATH.exists():
-        print(f"  {BOX_SYNC_FOLDER_PATH} does not exist. Creating it now...")
+        logger.info(f"  {BOX_SYNC_FOLDER_PATH} does not exist. Creating it now...")
         BOX_SYNC_FOLDER_PATH.mkdir()
     if not BOX_SYNC_ATTACHMENTS_FOLDER_PATH.exists():
-        print(f"  {BOX_SYNC_ATTACHMENTS_FOLDER_PATH} does not exist. Creating it now...")
+        logger.info(f"  {BOX_SYNC_ATTACHMENTS_FOLDER_PATH} does not exist. Creating it now...")
         BOX_SYNC_ATTACHMENTS_FOLDER_PATH.mkdir()
     if not BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH.exists():
-        print(f"  {BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH} does not exist. Creating it now...")
+        logger.info(f"  {BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH} does not exist. Creating it now...")
         BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH.mkdir()
 
     # Save attachments metadata from Box.com
@@ -140,20 +144,21 @@ def download_attachments_and_email_template_from_box(box_client: BoxClient):
         box_attachments_folder.contents.append(box_file)
 
     # FEATURE: Instead of constantly re-downloading attachments and email template, we can have a manifest.json to save the id and etag of our previous version and only pull from Box.com when the manifest.json files change.
+    logger.info(f"Downloading files to this location: {BOX_SYNC_ATTACHMENTS_FOLDER_PATH}")
     for idx, box_file in enumerate(box_attachments_folder.contents):
         counter = f"({idx+1}/{len(box_attachments_folder.contents)})"
         box_attachment_path = BOX_SYNC_ATTACHMENTS_FOLDER_PATH / Path(box_file.name)
         with open(box_attachment_path, "wb") as f:
-            print(f"  {counter} Downloading Box attachment to: {box_attachment_path}")
+            logger.info(f"  {counter} Downloading Box attachment: {box_file.name}...")
             box_client.downloads.download_file_to_output_stream(box_file.id, f)  # Downloads each Box.com attachment
 
     # Download email template(.boxnote extension)
     with open(EMAIL_TEMPLATE_BOXNOTE_PATH, "wb") as f:
-        print(f"  Downloading email attachment to: {EMAIL_TEMPLATE_BOXNOTE_PATH}")
+        logger.info(f"  Downloading email attachment: {EMAIL_TEMPLATE_BOXNOTE_FILENAME}...")
         box_client.downloads.download_file_to_output_stream(EMAIL_TEMPLATE_ID, f)  # Downloads Box.com email_template(.boxnote)
 
     # TODO: Look over image converting from boxnote to html as that might be broken/is untested.
-    print(f"  Converting email template from HTML format: {EMAIL_TEMPLATE_HTML_PATH}")
+    logger.info(f"  Converting email template from boxnote to HTML format...")
     convert_boxnote_to_html(EMAIL_TEMPLATE_BOXNOTE_PATH, BOX_DEVELOPER_TOKEN, EMAIL_TEMPLATE_HTML_PATH)
 
 def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]) -> List[List[SmartsheetContact]]:
@@ -173,36 +178,38 @@ def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]) ->
     for idx, contact in enumerate(contacts):
         counter = f"{idx+1}/{len(contacts)}"
         try:
-            print(f"  ({counter}) Sending separation email to: {contact.email}")
+            logger.info(f"  ({counter}) Sending separation email to: {contact.email}")
             custom_email = replace_email_template_placeholders(email_template, contact)
             email_manager.send_email(contact.email, subject, None, custom_email, BOX_SYNC_ATTACHMENTS_FOLDER_PATH)
             separating_contacts_success_list.append(contact)
         except Exception as e:
             # TODO: error map to keep track of failed emails
-            print(f"  ({counter}) Failed to send an email to: {contact.email}")
+            logger.warning(f"  ({counter}) Failed to send an email to: {contact.email}")
             separating_contacts_failed_list.append(contact)
     
     return [separating_contacts_success_list, separating_contacts_failed_list]
         
 def delete_attachments_and_email_templates():
-    if not BOX_SYNC_FOLDER_PATH.exists():
+    if BOX_SYNC_FOLDER_PATH.exists():
+        logger.info(f"  removing files from directory: {BOX_SYNC_FOLDER_PATH}")
+    else:
         raise Exception("_box_sync folder does not exist when it should.")
 
-    if not BOX_SYNC_ATTACHMENTS_FOLDER_PATH.exists():
+    if BOX_SYNC_ATTACHMENTS_FOLDER_PATH.exists():
+        for filename in os.listdir(BOX_SYNC_ATTACHMENTS_FOLDER_PATH):
+            filepath = os.path.join(BOX_SYNC_ATTACHMENTS_FOLDER_PATH, filename)
+            logger.info(f"  removing file: {filename}")
+            os.remove(filepath)
+    else:
         raise Exception("_box_sync/attachments folder does not exist when it should.")
     
-    if not BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH.exists():
+    if BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH.exists():
+        for filename in os.listdir(BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH):
+            filepath = os.path.join(BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH, filename)
+            logger.info(f"  removing file: {filename}")
+            os.remove(filepath)
+    else:
         raise Exception("_box_sync/attachments folder does not exist when it should.")
-    
-    for filename in os.listdir(BOX_SYNC_ATTACHMENTS_FOLDER_PATH):
-        filepath = os.path.join(BOX_SYNC_ATTACHMENTS_FOLDER_PATH, filename)
-        print(f"  removing file: {filepath}")
-        os.remove(filepath)
-    
-    for filename in os.listdir(BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH):
-        filepath = os.path.join(BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH, filename)
-        print(f"  removing file: {filepath}")
-        os.remove(filepath)
 
 def update_separation_contacts_to_email_sent(smartsheet_client: Smartsheet, contacts: list[SmartsheetContact]):
     new_cell = smartsheet.models.Cell()
@@ -222,68 +229,69 @@ def update_separation_contacts_to_email_sent(smartsheet_client: Smartsheet, cont
 def main():
     # Get Smartsheet and Box client
     try:
-        print(f"Fetching Smartsheet client...")
+        logger.info(f"Fetching Smartsheet client...")
         smartsheet_client: Smartsheet = get_smartsheet_client(access_token=SMARTSHEET_ACCESS_TOKEN)
-        print(f"✅ Successfully fetched Smartsheet client")
+        logger.info(f"✅ Successfully fetched Smartsheet client")
 
-        print(f"\nFetching Box client...")
+        logger.info(f"Fetching Box client...")
         auth: BoxDeveloperTokenAuth = BoxDeveloperTokenAuth(token=BOX_DEVELOPER_TOKEN)
         box_client: BoxClient = BoxClient(auth=auth)
         box_client.folders.get_folder_by_id('0')  # Runs to ensure credentials are valid.
-        print(f"✅ Successfully fetched Box client")
+        logger.info(f"✅ Successfully fetched Box client")
     except BoxSDKError as e:
-        print(f"❌ Error: {e.message}")
-        print(f"Please refresh Box.com API Developer Token.")
+        logger.exception(f"❌ Please refresh Box.com API Developer Token.")
         sys.exit(1)
 
     try:
-        print(f"\nRetrieving separating employees from Smartsheet...")
+        logger.info(f"Retrieving separating employees from Smartsheet...")
+
         smartsheet_separating_contacts = retrieve_separating_contacts_from_smartsheet(smartsheet_client)
         filtered_smartsheet_separating_contacts = list(filter(lambda contact: contact.email_status.lower() == SMARTSHEET_EMAIL_AWAITING_EMAIL_STATUS, smartsheet_separating_contacts))
-        print(f"✅ Successfully retrieved separating employees from Smartsheet.")
+
+        logger.info(f"✅ Successfully retrieved separating employees from Smartsheet.")
+
         if len(filtered_smartsheet_separating_contacts) == 0:
-            print(f"There are no employees who are waiting for their automated email.")
+            logger.info(f"There are no employees who are waiting for their automated email. Exiting program.")
             sys.exit(1)
     except Exception as e:
-        print(f"error: {e}")
-        print(f"❌ Failed to retrieve separating employees from Smartsheet.")
+        logger.exception(f"❌ Failed to retrieve separating employees from Smartsheet.")
+        sys.exit(1)
 
     # Downloading attachments and email template from Box.com
     try:
-        print(f"\nDownloading attachments and email template from Box.com...")
+        logger.info(f"Downloading attachments and email template from Box.com...")
         download_attachments_and_email_template_from_box(box_client)
-        print("✅ Successfully downloaded attachments and email template from Box.com.")
+        logger.info("✅ Successfully downloaded attachments and email template from Box.com.")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        logger.exception(f"❌ Failed to download attachments and email template from Box.com.")
         sys.exit(1)
 
     # Email contacts with filled in email templates and attachments
     try:
-        print(f"\nEmailing {len(filtered_smartsheet_separating_contacts)} contacts...")
+        logger.info(f"Emailing {len(filtered_smartsheet_separating_contacts)} contacts...")
         separating_contacts_success_list, separating_contacts_failed_list = \
             send_customized_emails_and_attachments(filtered_smartsheet_separating_contacts)
-        print("✅ Finished emailing contact(s).")
+        logger.info("✅ Finished emailing contact(s).")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        logger.exception(f"❌ Failed to email contacts their attachments.")
         sys.exit(1)
 
     # Update Separation contacts status to 'email sent'
     try:
-        print(f"\nUpdating Separation contacts status to 'email sent'...")
+        logger.info(f"Updating Separation contacts status to 'email sent'...")
         update_separation_contacts_to_email_sent(smartsheet_client, separating_contacts_success_list)
-        print(f"✅ Successfully updated Separation contacts.")
+        logger.info(f"✅ Successfully updated Separation contacts.")
     except Exception as e:
-        print(f"❌ Error: {e}")
-        print(f"Failed to update Smartsheet Separation contacts.")
+        logger.exception(f"❌ Failed to update Smartsheet Separation contacts.")
         sys.exit(1)
 
     # Deletes all attachments and email templates to revert to original state
     try:
-        print(f"\nCleaning up files...")
+        logger.info(f"Cleaning up downloaded files...")
         delete_attachments_and_email_templates()
-        print(f"✅ Succesfully cleaned up all files.")
+        logger.info(f"✅ Succesfully cleaned up all downloaded files.")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        logger.exception(f"❌ Failed to clean up downloaded files.")
         sys.exit(1)
 
 if __name__ == "__main__":
