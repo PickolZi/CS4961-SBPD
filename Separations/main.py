@@ -1,6 +1,7 @@
 import sys
 import os
 import logging
+from datetime import date, timedelta
 from pathlib import Path
 from typing import List
 from dotenv import load_dotenv
@@ -45,7 +46,7 @@ load_dotenv()
 BOX_DEVELOPER_TOKEN = os.getenv("BOX_ACCESS_TOKEN", "")
 SMARTSHEET_ACCESS_TOKEN = os.getenv("SMARTSHEET_ACCESS_TOKEN", "")
 
-# Box constants
+# Box Constants
 BOX_SYNC_FOLDER_PATH: Path = Path.cwd() / Path("_box_sync")
 BOX_SYNC_ATTACHMENTS_FOLDER_PATH = BOX_SYNC_FOLDER_PATH / Path("attachments")
 BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH = BOX_SYNC_FOLDER_PATH / Path("email_template")
@@ -59,11 +60,19 @@ SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID = "cr49HR94P7xHvWC3cQ7RfC6fQWmcxv8qvpxwq
 SMARTSHEET_EMAIL_AWAITING_EMAIL_STATUS = "awaiting email"
 SMARTSHEET_EMAIL_EMAIL_SENT_STATUS = "email sent"
 SMARTSHEET_COLUMN_EMAIL_STATUS_ID = 3592840163315588
+SMARTSHEET_COLUMN_LAST_DAY_DATE_ID = 4169898010562436
 SMARTSHEET_REQUIRED_COLUMN_TITLES_MAP = {
     3592840163315588: "email_status",
     6495241300037508: "email",
     4169898010562436: "last_day_date"
 }
+SMARTSHEET_HOLIDAY_TABLE_ID = 8351153952608132
+SMARTSHEET_HOLIDAY_PREVIOUS_DATES_COLUMN_ID = 4173747538579332
+SMARTSHEET_HOLIDAY_UPCOMING_DATES_COLUMN_ID = 4347590634852228
+
+# Business Logic Constants
+PAYROLL_START_DATE_EPOCH = date(2025,1,6)  # A payroll start period occured on Jan 6nd,2025. Will be used to calculate every future period
+
 
 def get_smartsheet_client(access_token: str) -> Smartsheet:
     logger.info(f"Fetching Smartsheet client...")
@@ -93,6 +102,93 @@ def get_box_client(box_developer_token: str) -> BoxClient:
 
     logger.info(f"✅ Successfully fetched Box client")
     return box_client
+
+def generate_missing_payroll_dates_in_smartsheet(smartsheet_client: Smartsheet):
+    # TODO: Add error handling here
+    logger.info(f"Generating missing payroll dates for separating contacts...")
+
+    # Fetch contacts with status 'awaiting email'
+    contacts = []  # [(row_id:int, last_day_date:date)]
+    res: Sheet = smartsheet_client.Sheets.get_sheet(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID)
+    for row in res.to_dict().get("rows", []):
+        row_id = row.get("id")
+        last_day_date = None
+        email_status = None
+        for cell in row.get("cells", []):
+            if cell.get("columnId") == SMARTSHEET_COLUMN_LAST_DAY_DATE_ID:
+                last_day_date = date.fromisoformat(cell.get("value"))
+            if cell.get("columnId") == SMARTSHEET_COLUMN_EMAIL_STATUS_ID:
+                email_status = cell.get("value")
+        if email_status == SMARTSHEET_EMAIL_AWAITING_EMAIL_STATUS:
+            contacts.append((row_id, last_day_date))
+    
+    if len(contacts) == 0:
+        logger.info("Smartsheet had 0 employees with the 'awaiting email' status. Exiting program.")
+    logger.info(f"Smartsheet found {len(contacts)} employees to generate payroll dates.")
+
+    # Fetch SBPD recognized holidays
+    logger.info(f"Fetching SBPD recognized holiday dates from Smartsheet...")
+    holiday_sheet: Sheet = smartsheet_client.Sheets.get_sheet(SMARTSHEET_HOLIDAY_TABLE_ID)
+    holiday_sheet_dict = holiday_sheet.to_dict()
+    upcoming_holiday_dates: list[date] = []
+    for row in holiday_sheet_dict.get("rows", []):
+        cells = row.get("cells", [])
+        for cell in cells:
+            if cell.get("columnId") in [SMARTSHEET_HOLIDAY_PREVIOUS_DATES_COLUMN_ID, SMARTSHEET_HOLIDAY_UPCOMING_DATES_COLUMN_ID] :
+                try:
+                    upcoming_holiday_dates.append(date.fromisoformat(cell.get("value")))
+                except ValueError:
+                    logger.error(f"Row ID: {row.get('id')}, failed to parse holiday iso str: {cell.get('value')} to holiday date")
+    
+    logger.info(f"✅ Successfully fetched {len(upcoming_holiday_dates)} holidays from SBPD Recognized Holiday sheet.")
+
+    # Generate payroll dates to update in Smartsheet
+    rows_to_update = []
+    for contact in contacts:
+        contact_last_day: date = contact[1]
+        days_since_epoch: timedelta = contact_last_day - PAYROLL_START_DATE_EPOCH
+        days_diff = days_since_epoch - timedelta(days=days_since_epoch.days % 14)
+        new_payroll_start_date = PAYROLL_START_DATE_EPOCH + days_diff
+        new_payroll_end_date = new_payroll_start_date + timedelta(days=13)
+        new_payroll_pay_date = new_payroll_end_date + timedelta(days=11)
+
+        # If payroll_pay_date lands on a holiday, pay is a day sooner.
+        if any([date == new_payroll_pay_date for date in upcoming_holiday_dates]):
+            logger.info(f"Payroll for row_id: {row_id} lands on holiday: {new_payroll_pay_date.isoformat()}, subtracting a day")
+            new_payroll_pay_date -= timedelta(days=1)
+
+        # Get last day of this month for last insurance day
+        insurance_last_date = new_payroll_end_date
+        _month = insurance_last_date.month
+        while insurance_last_date.month == _month:
+            insurance_last_date += timedelta(days=1)
+        insurance_last_date -= timedelta(days=1)
+
+        rows_to_update.append(
+            smartsheet.models.Row({
+                'id': contact[0],
+                'cells': [
+                    smartsheet.models.Cell({
+                        'column_id': 7363679878860676,
+                        'value': new_payroll_start_date.isoformat()
+                    }),
+                    smartsheet.models.Cell({
+                        'column_id': 1734180344647556,
+                        'value': new_payroll_end_date.isoformat()
+                    }),
+                    smartsheet.models.Cell({
+                        'column_id': 6237779972018052,
+                        'value': new_payroll_pay_date.isoformat()
+                    }),
+                    smartsheet.models.Cell({
+                        'column_id': 6412426227175300,
+                        'value': insurance_last_date.isoformat()
+                    }),
+                ]
+        }))
+
+    smartsheet_client.Sheets.update_rows(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID, rows_to_update)
+    logger.info(f"✅ Successfully generated payroll dates for separating contacts.")
 
 def retrieve_separating_contacts_from_smartsheet(smartsheet_client: Smartsheet) -> List[SmartsheetContact]:
     logger.info(f"Retrieving separating employees from Smartsheet...")
@@ -259,6 +355,15 @@ def main():
         logger.exception(f"❌ Failed to fetch Smartsheet/Box.com SDK Client.")
         sys.exit(1)
     
+    # TODO: Check if recognized holiday sheets need an update
+
+    # Generate missing payroll dates for 'awaiting email' rows, else update status to 'missing fields'
+    try:
+        generate_missing_payroll_dates_in_smartsheet(smartsheet_client)
+    except Exception:
+        logger.exception(f"❌ Failed to generate missing payroll date(s) for new email separations.")
+        sys.exit(1)
+
     # Retrieve all separating contacts from Smartsheet
     try:
         smartsheet_separating_contacts = retrieve_separating_contacts_from_smartsheet(smartsheet_client)
