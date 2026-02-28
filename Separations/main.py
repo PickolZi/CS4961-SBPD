@@ -89,6 +89,7 @@ def generate_missing_payroll_dates_in_smartsheet(smartsheet_client: Smartsheet):
     
     if len(contacts) == 0:
         logger.info("Smartsheet had 0 employees with the 'awaiting email' status. Exiting program.")
+        sys.exit(1)
     logger.info(f"Smartsheet found {len(contacts)} employees to generate payroll dates.")
 
     # Fetch SBPD recognized holidays
