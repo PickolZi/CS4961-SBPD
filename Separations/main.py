@@ -47,7 +47,8 @@ BOX_DEVELOPER_TOKEN = os.getenv("BOX_ACCESS_TOKEN", "")
 SMARTSHEET_ACCESS_TOKEN = os.getenv("SMARTSHEET_ACCESS_TOKEN", "")
 
 # Box Constants
-BOX_SYNC_FOLDER_PATH: Path = Path.cwd() / Path("_box_sync")
+BOX_SYNC_FOLDER_PATH: Path = Path("/tmp") / Path("_box_sync")
+# BOX_SYNC_FOLDER_PATH: Path = Path.cwd() / Path("_box_sync")
 BOX_SYNC_ATTACHMENTS_FOLDER_PATH = BOX_SYNC_FOLDER_PATH / Path("attachments")
 BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH = BOX_SYNC_FOLDER_PATH / Path("email_template")
 EMAIL_TEMPLATE_BOXNOTE_FILENAME = "email_template.boxnote"
@@ -284,7 +285,8 @@ def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]) ->
     if not email_template:
         raise Exception("HTML Email template could not be found.")
 
-    email_manager = EmailManager("smtp.gmail.com", 587, "pickol876@gmail.com", os.environ['GMAIL_APP_PASSWORD'])
+    email_manager = EmailManager("smtp.gmail.com", 587, "pickol876@gmail.com", os.getenv("GMAIL_APP_PASSWORD", ""))
+    
     subject = f"SBPD - Separation Information email IMPORTANT!"
 
     for idx, contact in enumerate(contacts):

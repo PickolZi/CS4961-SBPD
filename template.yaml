@@ -1,0 +1,44 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+    aws files for SBPD - CSULA webhook handler
+
+Globals:
+    Function:
+        Timeout: 60
+        Environment:
+            Variables:
+                SMARTSHEET_ACCESS_TOKEN: !Ref MySecret
+                BOX_ACCESS_TOKEN: !Ref MySecret
+                GMAIL_APP_PASSWORD: !Ref MySecret
+
+Resources:
+    SeparationsFunction:
+        Type: AWS::Serverless::Function
+        Properties:
+            CodeUri: Separations/
+            Handler: lambda_handler.lambda_handler
+            Runtime: python3.11
+            Architectures:
+                - x86_64
+            Events:
+                HelloWorld:
+                    Type: Api
+                    Properties:
+                        Path: /separations
+                        Method: post
+    MySecret:
+        Type: AWS::SecretsManager::Secret
+        Properties:
+            Name: prod/sbpd-csula
+
+Outputs:
+    SBPDApi:
+        Description: "API Gateway endpoint URL for Prod stage for SBPD - Separations function"
+        Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/hello/"
+    SeparationsFunction:
+        Description: "SBPD - Separations Lambda Function ARN"
+        Value: !GetAtt SeparationsFunction.Arn
+    SeparationsFunctionIamRole:
+        Description: "Implicit IAM Role created for SBPD - Separations function"
+        Value: !GetAtt SeparationsFunctionRole.Arn
