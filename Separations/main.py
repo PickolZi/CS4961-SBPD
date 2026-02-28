@@ -4,11 +4,9 @@ import logging
 from datetime import date, timedelta
 from pathlib import Path
 from typing import List
-from dotenv import load_dotenv
 
 import smartsheet
 from smartsheet.smartsheet import Smartsheet
-from smartsheet.models.attachment import Attachment
 from smartsheet.models.index_result import IndexResult
 from smartsheet.models import Sheet
 
@@ -18,8 +16,8 @@ from box_sdk_gen.box.errors import BoxSDKError
 from models import BoxFolder, BoxFile, SmartsheetContact
 from boxnote_to_html_parser.html_parser import convert_boxnote_to_html
 from email_manager import EmailManager
-
 from helpers.regex import replace_email_template_placeholders
+from constants import *
 
 """
 Separations Script.
@@ -40,44 +38,10 @@ logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet
 logger = logging.getLogger("separations")
 logger.setLevel(logging.INFO)
 
-load_dotenv()
-# Note: Developer tokens expire after 60 minutes
-# TODO: Need paid plan to create an App token that DOESN'T EXPIRE
-BOX_DEVELOPER_TOKEN = os.getenv("BOX_ACCESS_TOKEN", "")
-SMARTSHEET_ACCESS_TOKEN = os.getenv("SMARTSHEET_ACCESS_TOKEN", "")
-
-# Box Constants
-BOX_SYNC_FOLDER_PATH: Path = Path("/tmp") / Path("_box_sync")
-# BOX_SYNC_FOLDER_PATH: Path = Path.cwd() / Path("_box_sync")
-BOX_SYNC_ATTACHMENTS_FOLDER_PATH = BOX_SYNC_FOLDER_PATH / Path("attachments")
-BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH = BOX_SYNC_FOLDER_PATH / Path("email_template")
-EMAIL_TEMPLATE_BOXNOTE_FILENAME = "email_template.boxnote"
-EMAIL_TEMPLATE_HTML_FILENAME = "email_template.html"
-EMAIL_TEMPLATE_BOXNOTE_PATH = BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH / Path(EMAIL_TEMPLATE_BOXNOTE_FILENAME)
-EMAIL_TEMPLATE_HTML_PATH = BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH / Path(EMAIL_TEMPLATE_HTML_FILENAME)
-
-# Smartsheet Constants
-SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID = "cr49HR94P7xHvWC3cQ7RfC6fQWmcxv8qvpxwqR21"
-SMARTSHEET_EMAIL_AWAITING_EMAIL_STATUS = "awaiting email"
-SMARTSHEET_EMAIL_EMAIL_SENT_STATUS = "email sent"
-SMARTSHEET_COLUMN_EMAIL_STATUS_ID = 3592840163315588
-SMARTSHEET_COLUMN_LAST_DAY_DATE_ID = 4169898010562436
-SMARTSHEET_REQUIRED_COLUMN_TITLES_MAP = {
-    3592840163315588: "email_status",
-    6495241300037508: "email",
-    4169898010562436: "last_day_date"
-}
-SMARTSHEET_HOLIDAY_TABLE_ID = 8351153952608132
-SMARTSHEET_HOLIDAY_PREVIOUS_DATES_COLUMN_ID = 4173747538579332
-SMARTSHEET_HOLIDAY_UPCOMING_DATES_COLUMN_ID = 4347590634852228
-
-# Business Logic Constants
-PAYROLL_START_DATE_EPOCH = date(2025,1,6)  # A payroll start period occured on Jan 6nd,2025. Will be used to calculate every future period
-
 
 def get_smartsheet_client(access_token: str) -> Smartsheet:
     logger.info(f"Fetching Smartsheet client...")
-    smartsheet_client = smartsheet.Smartsheet(access_token=SMARTSHEET_ACCESS_TOKEN)
+    smartsheet_client = smartsheet.Smartsheet(SMARTSHEET_ACCESS_TOKEN)
 
     # Test API call because no error is thrown when connection fails.
     response:IndexResult = smartsheet_client.Sheets.list_sheets()
@@ -92,8 +56,8 @@ def get_smartsheet_client(access_token: str) -> Smartsheet:
 def get_box_client(box_developer_token: str) -> BoxClient:
     logger.info(f"Fetching Box client...")
 
-    auth: BoxDeveloperTokenAuth = BoxDeveloperTokenAuth(token=box_developer_token)
-    box_client: BoxClient = BoxClient(auth=auth)
+    auth: BoxDeveloperTokenAuth = BoxDeveloperTokenAuth(box_developer_token)
+    box_client: BoxClient = BoxClient(auth)
 
     try:
         box_client.folders.get_folder_by_id('0')  # Runs to ensure credentials are valid.
@@ -232,9 +196,6 @@ def retrieve_separating_contacts_from_smartsheet(smartsheet_client: Smartsheet) 
 def download_attachments_and_email_template_from_box(box_client: BoxClient):
     logger.info(f"Downloading attachments and email template from Box.com...")
 
-    IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID = "364698186466"
-    EMAIL_TEMPLATE_ID = "2126258145331"
-
     # Ensure proper _box_sync folder structure exists, if not, create it.
     if not BOX_SYNC_FOLDER_PATH.exists():
         logger.info(f"  {BOX_SYNC_FOLDER_PATH} does not exist. Creating it now...")
@@ -247,8 +208,8 @@ def download_attachments_and_email_template_from_box(box_client: BoxClient):
         BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH.mkdir()
 
     # Save attachments metadata from Box.com
-    box_attachments_folder: BoxFolder = BoxFolder(IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID)
-    for entry in box_client.folders.get_folder_items(IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID).entries:
+    box_attachments_folder: BoxFolder = BoxFolder(BOX_IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID)
+    for entry in box_client.folders.get_folder_items(BOX_IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID).entries:
         box_file: BoxFile = BoxFile(entry.id, entry.name, entry.file_version.id, entry.sha_1)
         box_attachments_folder.contents.append(box_file)
 
@@ -264,7 +225,7 @@ def download_attachments_and_email_template_from_box(box_client: BoxClient):
     # Download email template(.boxnote extension)
     with open(EMAIL_TEMPLATE_BOXNOTE_PATH, "wb") as f:
         logger.info(f"  Downloading email attachment: {EMAIL_TEMPLATE_BOXNOTE_FILENAME}...")
-        box_client.downloads.download_file_to_output_stream(EMAIL_TEMPLATE_ID, f)  # Downloads Box.com email_template(.boxnote)
+        box_client.downloads.download_file_to_output_stream(BOX_EMAIL_TEMPLATE_FILE_ID, f)  # Downloads Box.com email_template(.boxnote)
 
     # TODO: Look over image converting from boxnote to html as that might be broken/is untested.
     logger.info(f"  Converting email template from boxnote to HTML format...")
@@ -285,16 +246,14 @@ def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]) ->
     if not email_template:
         raise Exception("HTML Email template could not be found.")
 
-    email_manager = EmailManager("smtp.gmail.com", 587, "pickol876@gmail.com", os.getenv("GMAIL_APP_PASSWORD", ""))
-    
-    subject = f"SBPD - Separation Information email IMPORTANT!"
+    email_manager = EmailManager(EMAIL_SMTP_SERVER, EMAIL_PORT, EMAIL_SENDER_ADDRESS, EMAIL_SENDER_APP_PASSWORD)
 
     for idx, contact in enumerate(contacts):
         counter = f"{idx+1}/{len(contacts)}"
         try:
             logger.info(f"  ({counter}) Sending separation email to: {contact.email}")
             custom_email = replace_email_template_placeholders(email_template, contact)
-            email_manager.send_email(contact.email, subject, None, custom_email, BOX_SYNC_ATTACHMENTS_FOLDER_PATH)
+            email_manager.send_email(contact.email, EMAIL_SUBJECT, None, custom_email, BOX_SYNC_ATTACHMENTS_FOLDER_PATH)
             separating_contacts_success_list.append(contact)
         except Exception as e:
             # TODO: error map to keep track of failed emails
@@ -351,8 +310,8 @@ def update_separation_contacts_to_email_sent(smartsheet_client: Smartsheet, cont
 def main():
     # Get Smartsheet and Box client
     try:
-        smartsheet_client: Smartsheet = get_smartsheet_client(access_token=SMARTSHEET_ACCESS_TOKEN)
-        box_client: BoxClient = get_box_client(box_developer_token=BOX_DEVELOPER_TOKEN)
+        smartsheet_client: Smartsheet = get_smartsheet_client(SMARTSHEET_ACCESS_TOKEN)
+        box_client: BoxClient = get_box_client(BOX_DEVELOPER_TOKEN)
     except Exception as e:
         logger.exception(f"❌ Failed to fetch Smartsheet/Box.com SDK Client.")
         sys.exit(1)

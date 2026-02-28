@@ -1,0 +1,61 @@
+"""
+Purpose: Centralized file to update/set environment variables and constants
+
+i know online says not to import *, but these constant names are already so long
+"""
+
+import os
+from pathlib import Path
+from datetime import date
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
+# Settings
+STAGE_DEV = "DEV"
+STAGE_PROD = "PROD"
+STAGE = os.getenv("SBPD_STAGE", STAGE_DEV)
+
+# Email Settings
+EMAIL_SMTP_SERVER = "smtp.gmail.com"
+EMAIL_PORT = 587
+EMAIL_SENDER_ADDRESS = "pickol876@gmail.com"
+EMAIL_SENDER_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
+EMAIL_SUBJECT = "SBPD - Separation Information email IMPORTANT!"
+
+# API ACCESS TOKENS
+SMARTSHEET_ACCESS_TOKEN = os.getenv("SMARTSHEET_ACCESS_TOKEN")
+BOX_DEVELOPER_TOKEN = os.getenv("BOX_ACCESS_TOKEN", "")  # TODO: Token expires in 60 minutes
+
+# Box Constants
+if STAGE == STAGE_DEV:
+    BOX_SYNC_FOLDER_PATH = Path.cwd() / Path("_box_sync")
+else:
+    BOX_SYNC_FOLDER_PATH = Path("/tmp") / Path("_box_sync")
+BOX_SYNC_ATTACHMENTS_FOLDER_PATH = BOX_SYNC_FOLDER_PATH / Path("attachments")
+BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH = BOX_SYNC_FOLDER_PATH / Path("email_template")
+EMAIL_TEMPLATE_BOXNOTE_FILENAME = "email_template.boxnote"
+EMAIL_TEMPLATE_HTML_FILENAME = "email_template.html"
+EMAIL_TEMPLATE_BOXNOTE_PATH = BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH / Path(EMAIL_TEMPLATE_BOXNOTE_FILENAME)
+EMAIL_TEMPLATE_HTML_PATH = BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH / Path(EMAIL_TEMPLATE_HTML_FILENAME)
+BOX_IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID = "364698186466"
+BOX_EMAIL_TEMPLATE_FILE_ID = "2126258145331"
+
+# Smartsheet Constants
+SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID = "cr49HR94P7xHvWC3cQ7RfC6fQWmcxv8qvpxwqR21"
+SMARTSHEET_EMAIL_AWAITING_EMAIL_STATUS = "awaiting email"
+SMARTSHEET_EMAIL_EMAIL_SENT_STATUS = "email sent"
+SMARTSHEET_COLUMN_EMAIL_STATUS_ID = 3592840163315588
+SMARTSHEET_COLUMN_LAST_DAY_DATE_ID = 4169898010562436
+SMARTSHEET_REQUIRED_COLUMN_TITLES_MAP = {
+    3592840163315588: "email_status",
+    6495241300037508: "email",
+    4169898010562436: "last_day_date"
+}
+SMARTSHEET_HOLIDAY_TABLE_ID = 8351153952608132
+SMARTSHEET_HOLIDAY_PREVIOUS_DATES_COLUMN_ID = 4173747538579332
+SMARTSHEET_HOLIDAY_UPCOMING_DATES_COLUMN_ID = 4347590634852228
+
+# Business Logic Constants
+PAYROLL_START_DATE_EPOCH = date(2025,1,6)  # Will be used to calculate every future period
