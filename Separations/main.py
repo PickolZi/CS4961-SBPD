@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List
 
 import smartsheet
-from smartsheet.smartsheet import Smartsheet
+from smartsheet.sheets import Sheets
 from smartsheet.models.index_result import IndexResult
 from smartsheet.models import Sheet
 
@@ -39,19 +39,20 @@ logger = logging.getLogger("separations")
 logger.setLevel(logging.INFO)
 
 
-def get_smartsheet_client(access_token: str) -> Smartsheet:
+def get_smartsheet_sheet_client(access_token: str) -> Sheets:
     logger.info(f"Fetching Smartsheet client...")
     smartsheet_client = smartsheet.Smartsheet(SMARTSHEET_ACCESS_TOKEN)
+    sheet_client = Sheets(smartsheet_client)
 
     # Test API call because no error is thrown when connection fails.
-    response:IndexResult = smartsheet_client.Sheets.list_sheets()
+    response:IndexResult = sheet_client.list_sheets()
     if type(response) == smartsheet.models.error.Error:
         err_code = response.result.error_code
         err_message = response.result.message
         raise RuntimeError(err_message)
 
     logger.info(f"✅ Successfully fetched Smartsheet client")
-    return smartsheet_client
+    return sheet_client
 
 def get_box_client(box_developer_token: str) -> BoxClient:
     logger.info(f"Fetching Box client...")
@@ -68,13 +69,13 @@ def get_box_client(box_developer_token: str) -> BoxClient:
     logger.info(f"✅ Successfully fetched Box client")
     return box_client
 
-def generate_missing_payroll_dates_in_smartsheet(smartsheet_client: Smartsheet):
+def generate_missing_payroll_dates_in_smartsheet(sheet_client: Sheets):
     # TODO: Add error handling here
     logger.info(f"Generating missing payroll dates for separating contacts...")
 
     # Fetch contacts with status 'awaiting email'
     contacts = []  # [(row_id:int, last_day_date:date)]
-    res: Sheet = smartsheet_client.Sheets.get_sheet(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID)
+    res: Sheet = sheet_client.get_sheet(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID)
     for row in res.to_dict().get("rows", []):
         row_id = row.get("id")
         last_day_date = None
@@ -94,7 +95,7 @@ def generate_missing_payroll_dates_in_smartsheet(smartsheet_client: Smartsheet):
 
     # Fetch SBPD recognized holidays
     logger.info(f"Fetching SBPD recognized holiday dates from Smartsheet...")
-    holiday_sheet: Sheet = smartsheet_client.Sheets.get_sheet(SMARTSHEET_HOLIDAY_TABLE_ID)
+    holiday_sheet: Sheet = sheet_client.get_sheet(SMARTSHEET_HOLIDAY_TABLE_ID)
     holiday_sheet_dict = holiday_sheet.to_dict()
     upcoming_holiday_dates: list[date] = []
     for row in holiday_sheet_dict.get("rows", []):
@@ -153,14 +154,14 @@ def generate_missing_payroll_dates_in_smartsheet(smartsheet_client: Smartsheet):
                 ]
         }))
 
-    smartsheet_client.Sheets.update_rows(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID, rows_to_update)
+    sheet_client.update_rows(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID, rows_to_update)
     logger.info(f"✅ Successfully generated payroll dates for separating contacts.")
 
-def retrieve_separating_contacts_from_smartsheet(smartsheet_client: Smartsheet) -> List[SmartsheetContact]:
+def retrieve_separating_contacts_from_smartsheet(sheet_client: Sheets) -> List[SmartsheetContact]:
     logger.info(f"Retrieving separating employees from Smartsheet...")
 
     filtered_smartsheet_separating_contacts = list()
-    res: Sheet = smartsheet_client.Sheets.get_sheet(sheet_id=SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID)
+    res: Sheet = sheet_client.get_sheet(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID)
     smartsheet_json: dict = res.to_dict()
 
     # TODO: Add null checks AND error handling is really bad here. Really, come back and redo it soon. And in the main function part.
@@ -290,7 +291,7 @@ def delete_attachments_and_email_templates():
 
     logger.info(f"✅ Successfully cleaned up all downloaded files.")
 
-def update_separation_contacts_to_email_sent(smartsheet_client: Smartsheet, contacts: list[SmartsheetContact]):
+def update_separation_contacts_email_status(sheet_client: Sheets, contacts: list[SmartsheetContact]):
     logger.info(f"Updating Separation contacts status to 'email sent'...")
 
     new_cell = smartsheet.models.Cell()
@@ -304,14 +305,14 @@ def update_separation_contacts_to_email_sent(smartsheet_client: Smartsheet, cont
         row.cells.append(new_cell)
         rows_to_update.append(row)
 
-    response = smartsheet_client.Sheets.update_rows(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID, rows_to_update)
+    response = sheet_client.update_rows(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID, rows_to_update)
     logger.info(f"✅ Successfully updated Separation contacts.")
 
 
 def main():
     # Get Smartsheet and Box client
     try:
-        smartsheet_client: Smartsheet = get_smartsheet_client(SMARTSHEET_ACCESS_TOKEN)
+        sheet_client: Sheets = get_smartsheet_sheet_client(SMARTSHEET_ACCESS_TOKEN)
         box_client: BoxClient = get_box_client(BOX_DEVELOPER_TOKEN)
     except Exception as e:
         logger.exception(f"❌ Failed to fetch Smartsheet/Box.com SDK Client.")
@@ -321,14 +322,14 @@ def main():
 
     # Generate missing payroll dates for 'awaiting email' rows, else update status to 'missing fields'
     try:
-        generate_missing_payroll_dates_in_smartsheet(smartsheet_client)
+        generate_missing_payroll_dates_in_smartsheet(sheet_client)
     except Exception:
         logger.exception(f"❌ Failed to generate missing payroll date(s) for new email separations.")
         sys.exit(1)
 
     # Retrieve all separating contacts from Smartsheet
     try:
-        smartsheet_separating_contacts = retrieve_separating_contacts_from_smartsheet(smartsheet_client)
+        smartsheet_separating_contacts = retrieve_separating_contacts_from_smartsheet(sheet_client)
         filtered_smartsheet_separating_contacts = list(filter(lambda contact: contact.email_status.lower() == SMARTSHEET_EMAIL_AWAITING_EMAIL_STATUS, smartsheet_separating_contacts))
 
         if len(filtered_smartsheet_separating_contacts) == 0:
@@ -355,7 +356,7 @@ def main():
 
     # Update Separation contacts status to 'email sent'
     try:
-        update_separation_contacts_to_email_sent(smartsheet_client, separating_contacts_success_list)
+        update_separation_contacts_email_status(sheet_client, separating_contacts_success_list)
     except Exception as e:
         logger.exception(f"❌ Failed to update Smartsheet Separation contacts.")
         sys.exit(1)
