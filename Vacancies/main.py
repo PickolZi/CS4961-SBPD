@@ -2,11 +2,19 @@ import os
 import datetime as dt
 import pandas as pd
 import requests
+import logging
 
 from pathlib import Path
 
 SMARTSHEET_API_BASE = "https://api.smartsheet.com/2.0"
 
+logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
+logger = logging.getLogger("vacancies")
+logger.setLevel(logging.INFO)
+
+logger_stream_handler = logging.StreamHandler()
+logger_stream_handler.setFormatter(logging.Formatter("%(asctime)s:[%(levelname)s]:%(message)s"))
+logger.addHandler(logger_stream_handler)
 
 def smartsheet_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
