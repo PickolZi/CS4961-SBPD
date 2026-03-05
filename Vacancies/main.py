@@ -2,7 +2,6 @@ import os
 import sys
 import datetime as dt
 import pandas as pd
-import requests
 import logging
 
 import smartsheet
@@ -24,35 +23,6 @@ logger.addHandler(logger_stream_handler)
 
 sheets_client:Sheets = None
 
-
-def smartsheet_headers(token: str) -> dict:
-    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-def read_den_xls(path: str) -> pd.DataFrame:
-    df = pd.read_excel(path, converters={'Dept':str, 'PosID':str})
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
-
-def add_rows(sheet_id: int, token: str, rows_payload: list) -> None:
-    if not rows_payload:
-        print("No new vacancies to add.")
-        return
-
-    r = requests.post(
-        f"{SMARTSHEET_API_BASE}/sheets/{sheet_id}/rows",
-        headers=smartsheet_headers(token),
-        json=rows_payload
-    )
-
-    if not r.ok:
-        print("Smartsheet error status:", r.status_code)
-        try:
-            print("Smartsheet error body:", r.json())
-        except Exception:
-            print("Smartsheet error text:", r.text)
-        r.raise_for_status()
-
-    print(f"Added {len(rows_payload)} row(s).")
 
 def validate_environment_variables():
     logger.info("Validating integrity of environment variables...")
@@ -132,6 +102,68 @@ def get_existing_pairs(sheet: Sheet, smartsheet_cols_map: dict) -> set:
 
     return existing
 
+def read_and_validate_den_xls(path: str) -> pd.DataFrame:
+    logger.info("Reading and validating incoming DEN file...")
+    df = pd.read_excel(path, converters={'Dept':str, 'PosID':str})
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # Ensure proper column header names
+    required_den_cols = ["Dept", "PosID", "JobClassTitle"]
+    missing_den = [c for c in required_den_cols if c not in df.columns]
+    if missing_den:
+        raise KeyError(f"DEN file is missing required column(s): {missing_den}. Found: {list(df.columns)}")
+
+    # Get rid of completely empty rows
+    df = df.dropna(how="all")
+
+    # Find rows with missing required column values
+    df[required_den_cols] = df[required_den_cols].replace("", pd.NA)
+    invalid_rows = df[df[required_den_cols].isna().any(axis=1)]
+    for _, row in invalid_rows.iterrows():
+        logger.info(f"🚧 Dropping row from DEN due to missing required field(s): Dept: \'{row.get('Dept')}\', PosID: \'{row.get('PosID')}\', JobClassTitle: \'{row.get('JobClassTitle')}\'")
+    df = df.drop(invalid_rows.index)
+
+    logger.info("✅ Successfully read and validated DEN file.")
+
+    if len(df) == 0:
+        logger.info("DEN file has no valid rows to add. Exiting script early.")
+        sys.exit(1)
+
+    return df
+
+def create_new_rows_in_smartsheet(df: pd.DataFrame, smartsheet_cols_map: dict, existing_pairs: set):
+    logger.info(f"Creating {len(df)} new rows in Smartsheet...")
+
+    today = dt.date.today().strftime("%Y-%m-%d")
+    new_rows: Row = []
+    for _, r in df.iterrows():
+        dept_id = r["Dept"]
+        pos_id = r["PosID"]
+        job_title = r["JobClassTitle"]
+
+        # Remove duplicate entries
+        if (dept_id, pos_id) in existing_pairs:
+            continue
+
+        logger.info(f"Adding new entry to Smartsheet. Dept: '{dept_id}', PosID: '{pos_id}', JobClassTitle: '{job_title}'.")
+
+        new_rows.append(Row({
+            "toBottom": True,
+            "cells": [
+                Cell({"columnId": smartsheet_cols_map["Dept"], "value": dept_id}),
+                Cell({"columnId": smartsheet_cols_map["PosID"], "value": pos_id}),
+                Cell({"columnId": smartsheet_cols_map["JobClassTitle"], "value": job_title}),
+                Cell({"columnId": smartsheet_cols_map["Vacancy Start Date"], "value": today}),
+                Cell({"columnId": smartsheet_cols_map["Status"], "value": "POSTED"}),
+            ]
+        }))
+
+    res = sheets_client.add_rows(SMARTSHEET_VACANCIES_TABLE_ID, new_rows)
+    if type(res) == smartsheet.models.Error:
+        raise RuntimeError(res.result.message)
+
+    logger.info(f"✅ Successfully created {len(df)} new rows in Smartsheet.")
+
 def main():
     # Validate environment variables to ensure they all exists and are valid
     try:
@@ -159,52 +191,22 @@ def main():
     try:
         existing_pairs = get_existing_pairs(sheet, smartsheet_cols_map)  # (dept_id, pos_id)
     except Exception:
-        logger.exception(f"❌Failed to fetch (dept_id, pos_id) pairs from Smartsheet.")
+        logger.exception(f"❌ Failed to fetch (dept_id, pos_id) pairs from Smartsheet.")
         sys.exit(1)
 
-    df = read_den_xls(DEN_PATH)
+    # Read DEN file and make sure it has the appropriate data
+    try:
+        df = read_and_validate_den_xls(DEN_PATH)
+    except Exception:
+        logger.exception("❌ Failed to read or validate DEN file. Exiting program.")
+        sys.exit(1)
 
-    required_den_cols = ["Dept", "PosID", "JobClassTitle"]
-    missing_den = [c for c in required_den_cols if c not in df.columns]
-    if missing_den:
-        raise KeyError(f"DEN file is missing required column(s): {missing_den}. Found: {list(df.columns)}")
-
-    today = dt.date.today().strftime("%Y-%m-%d")
-
-    def _normalize_xls_values(str) -> str:
-        try:
-            return str.strip() if str.lower() != "nan" else None
-        except Exception:
-            return None
-
-    new_rows = []
-    for _, r in df.iterrows():
-        dept_id = _normalize_xls_values(r["Dept"])
-        pos_id = _normalize_xls_values(r["PosID"])
-        job_title = _normalize_xls_values(r["JobClassTitle"])
-
-        # Excel has empty rows sometimes
-        if not dept_id or not pos_id or not job_title:
-            continue
-
-        # Duplicate entries
-        if (dept_id, pos_id) in existing_pairs:
-            continue
-
-        logger.info(f"Adding new entry to Smartsheet. Dept: '{dept_id}', PosID: '{pos_id}', JobClassTitle: '{job_title}'.")
-
-        new_rows.append({
-            "toBottom": True,
-            "cells": [
-                {"columnId": smartsheet_cols_map["Dept"], "value": dept_id},
-                {"columnId": smartsheet_cols_map["PosID"], "value": pos_id},
-                {"columnId": smartsheet_cols_map["JobClassTitle"], "value": job_title},
-                {"columnId": smartsheet_cols_map["Vacancy Start Date"], "value": today},
-                {"columnId": smartsheet_cols_map["Status"], "value": "POSTED"},
-            ]
-        })
-
-    add_rows(SMARTSHEET_VACANCIES_TABLE_ID, SMARTSHEET_ACCESS_TOKEN, new_rows)
+    # Send create row(s) SDK request to Smartsheet
+    try:
+        create_new_rows_in_smartsheet(df, smartsheet_cols_map, existing_pairs)
+    except Exception:
+        logger.exception("❌ Failed to create new row(s) in Smartsheet. Exiting program.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
