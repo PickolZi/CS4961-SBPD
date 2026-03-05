@@ -1,12 +1,11 @@
 import os
+import sys
 import datetime as dt
 import pandas as pd
 import requests
 import logging
 
-from pathlib import Path
-
-SMARTSHEET_API_BASE = "https://api.smartsheet.com/2.0"
+from constants import *
 
 logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
 logger = logging.getLogger("vacancies")
@@ -100,23 +99,36 @@ def add_rows(sheet_id: int, token: str, rows_payload: list) -> None:
 
     print(f"Added {len(rows_payload)} row(s).")
 
+def validate_environment_variables():
+    logger.info("Validating integrity of environment variables...")
+    error = False
+
+    if not SMARTSHEET_ACCESS_TOKEN:
+        error = True
+        logger.error("❌ SMARTSHEET_ACCESS_TOKEN is missing/blank.")
+    if not SMARTSHEET_VACANCIES_TABLE_ID:
+        error = True
+        logger.error("❌ SMARTSHEET_VACANCIES_TABLE_ID is missing/blank.")
+    if not DEN_PATH:
+        error = True
+        logger.error("❌ DEN_XLS_PATH is missing/blank.")
+    elif not os.path.exists(DEN_PATH):
+        error = True
+        logger.error(f"❌ DEN file not found at: {DEN_PATH}")
+
+    if error:
+        raise RuntimeError("❌ Failed to load one or more environment variable(s). Exiting script.")
+
+    logger.info("✅ Successfully validated all necessary environment variables.")
+
 
 def main():
-    token = os.environ.get("SMARTSHEET_ACCESS_TOKEN", "").strip()
-    sheet_id = int(os.environ.get("SMARTSHEET_SHEET_ID", "0"))
-    # den_path = os.environ.get("DEN_XLS_PATH", "").strip().strip('"')
-    den_path = Path.cwd() / Path("DEN.xls")
+    try:
+        validate_environment_variables()
+    except RuntimeError:
+        sys.exit(1)
 
-    if not token:
-        raise ValueError("SMARTSHEET_ACCESS_TOKEN is missing/blank.")
-    if sheet_id <= 0:
-        raise ValueError("SMARTSHEET_SHEET_ID is missing/invalid.")
-    if not den_path:
-        raise ValueError("DEN_XLS_PATH is missing/blank.")
-    if not os.path.exists(den_path):
-        raise FileNotFoundError(f"DEN file not found at: {den_path}")
-
-    sheet = get_sheet(sheet_id, token)
+    sheet = get_sheet(SMARTSHEET_VACANCIES_TABLE_ID, SMARTSHEET_ACCESS_TOKEN)
     col_map = build_column_map(sheet)
 
     required_sheet_cols = ["Dept", "PosID", "JobClassTitle", "Vacancy Start Date", "Status"]
@@ -126,7 +138,7 @@ def main():
 
     existing_pairs = get_existing_pairs(sheet, col_map)
 
-    df = read_den_xls(den_path)
+    df = read_den_xls(DEN_PATH)
 
     required_den_cols = ["Dept", "PosID", "JobClassTitle"]
     missing_den = [c for c in required_den_cols if c not in df.columns]
@@ -163,7 +175,7 @@ def main():
             ]
         })
 
-    add_rows(sheet_id, token, new_rows)
+    add_rows(SMARTSHEET_VACANCIES_TABLE_ID, SMARTSHEET_ACCESS_TOKEN, new_rows)
 
 
 if __name__ == "__main__":
