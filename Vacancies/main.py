@@ -5,6 +5,10 @@ import pandas as pd
 import requests
 import logging
 
+import smartsheet
+from smartsheet import Smartsheet
+from smartsheet.sheets import Sheets
+
 from constants import *
 
 logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
@@ -14,6 +18,9 @@ logger.setLevel(logging.INFO)
 logger_stream_handler = logging.StreamHandler()
 logger_stream_handler.setFormatter(logging.Formatter("%(asctime)s:[%(levelname)s]:%(message)s"))
 logger.addHandler(logger_stream_handler)
+
+sheets_client:Sheets = None
+
 
 def smartsheet_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
@@ -101,28 +108,37 @@ def add_rows(sheet_id: int, token: str, rows_payload: list) -> None:
 
 def validate_environment_variables():
     logger.info("Validating integrity of environment variables...")
-    error = False
+    has_error = False
 
     if not SMARTSHEET_ACCESS_TOKEN:
-        error = True
+        has_error = True
         logger.error("❌ SMARTSHEET_ACCESS_TOKEN is missing/blank.")
     if not SMARTSHEET_VACANCIES_TABLE_ID:
-        error = True
+        has_error = True
         logger.error("❌ SMARTSHEET_VACANCIES_TABLE_ID is missing/blank.")
     if not DEN_PATH:
-        error = True
+        has_error = True
         logger.error("❌ DEN_XLS_PATH is missing/blank.")
     elif not os.path.exists(DEN_PATH):
-        error = True
+        has_error = True
         logger.error(f"❌ DEN file not found at: {DEN_PATH}")
 
-    if error:
+    global sheets_client
+    sheets_client = Sheets(Smartsheet(SMARTSHEET_ACCESS_TOKEN))
+    res = sheets_client.list_sheets()  # Validating that our smartsheet credentials are valid.
+    if type(res) == smartsheet.models.Error:
+        has_error = True
+        err_msg = res.result.message
+        logger.error(f"❌ Failed to authenticate Smartsheet client. {err_msg}")
+
+    if has_error:
         raise RuntimeError("❌ Failed to load one or more environment variable(s). Exiting script.")
 
     logger.info("✅ Successfully validated all necessary environment variables.")
 
 
 def main():
+    # Validate environment variables to ensure they all exists and are valid
     try:
         validate_environment_variables()
     except RuntimeError:
