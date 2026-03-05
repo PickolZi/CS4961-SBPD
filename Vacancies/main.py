@@ -11,6 +11,9 @@ from smartsheet.models.sheet import Sheet
 from smartsheet.models.row import Row
 from smartsheet.models.cell import Cell
 
+from box_sdk_gen import BoxClient, BoxDeveloperTokenAuth
+from box_sdk_gen.box.errors import BoxSDKError
+
 from constants import *
 
 logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
@@ -23,6 +26,7 @@ if STAGE == STAGE_DEV:
     logger.addHandler(logger_stream_handler)
 
 sheets_client:Sheets = None
+box_client: BoxClient = None
 
 
 def validate_environment_variables():
@@ -42,6 +46,11 @@ def validate_environment_variables():
         has_error = True
         logger.error(f"❌ DEN file not found at: {DEN_PATH}")
 
+    if not BOX_ACCESS_TOKEN:
+        has_error = True
+        logger.error("❌ BOX_ACCESS_TOKEN is missing/blank.")
+
+    # Smartsheet Sheet SDK Client
     global sheets_client
     sheets_client = Sheets(Smartsheet(SMARTSHEET_ACCESS_TOKEN))
     res = sheets_client.list_sheets()  # Validating that our smartsheet credentials are valid.
@@ -49,6 +58,15 @@ def validate_environment_variables():
         has_error = True
         err_msg = res.result.message
         logger.error(f"❌ Failed to authenticate Smartsheet client. {err_msg}")
+
+    # Box SDK Client
+    global box_client
+    box_client = BoxClient(BoxDeveloperTokenAuth(BOX_ACCESS_TOKEN))
+    try:
+        box_client.folders.get_folder_by_id('0')  # Runs to ensure credentials are valid.
+    except BoxSDKError as e:
+        has_error = True
+        logger.error(f"❌ Please refresh Box.com API Developer Token.")
 
     if has_error:
         raise RuntimeError("❌ Failed to load one or more environment variable(s). Exiting script.")
@@ -175,7 +193,8 @@ def main():
     # Validate environment variables to ensure they all exists and are valid
     try:
         validate_environment_variables()
-    except RuntimeError:
+    except RuntimeError as e:
+        logger.exception(e)
         sys.exit(1)
 
     # Retrieve Vacancies & Recruitment sheet from Smartsheet
