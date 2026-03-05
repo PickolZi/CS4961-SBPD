@@ -178,10 +178,6 @@ def read_and_validate_den_xls(byte_stream: BytesIO) -> pd.DataFrame:
 
     logger.info("✅ Successfully read and validated DEN file.")
 
-    if len(df) == 0:
-        logger.info("DEN file has no valid rows to add. Exiting script early.")
-        sys.exit(1)
-
     return df
 
 def create_new_rows_in_smartsheet(df: pd.DataFrame, smartsheet_cols_map: dict, existing_pairs: set):
@@ -239,14 +235,14 @@ def main():
         validate_environment_variables()
     except RuntimeError as e:
         logger.exception(e)
-        sys.exit(1)
+        return
 
     # Retrieve Vacancies & Recruitment sheet from Smartsheet
     try:
         sheet = get_sheet(SMARTSHEET_VACANCIES_TABLE_ID)
     except:
         logger.exception(f"❌ Failed to retrieve Vacancies & Recruitment sheet from Smartsheet with id: '{SMARTSHEET_VACANCIES_TABLE_ID}'.")
-        sys.exit(1)
+        return
 
     smartsheet_cols_map = {col.title.strip(): col.id for col in sheet.columns.to_list()}
 
@@ -255,43 +251,47 @@ def main():
         validate_smartsheet_column_names(sheet, smartsheet_cols_map)
     except Exception:
         logger.exception(f"❌ Smartsheet sheet with id: '{SMARTSHEET_VACANCIES_TABLE_ID}' is missing crucial columns.")
-        sys.exit(1)
+        return
 
     # Create map of (dept_id, pos_id) pairs to compare with incoming DEN file to not have duplicates.
     try:
         existing_pairs = get_existing_pairs(sheet, smartsheet_cols_map)  # (dept_id, pos_id)
     except Exception:
         logger.exception(f"❌ Failed to fetch (dept_id, pos_id) pairs from Smartsheet.")
-        sys.exit(1)
+        return
 
     # Read DEN file bytestream if it exists from Box.com. Will be passed to the following method.
     try:
         byte_stream = get_den_byte_stream_from_box()
     except Exception as e:
         logger.exception(e)
-        sys.exit(1)
+        return
 
     # Read DEN file and make sure it has the appropriate data
     try:
         df = read_and_validate_den_xls(byte_stream)
+        if len(df) == 0:
+            logger.info("DEN file has no valid rows to add. Exiting script early.")
+            return
     except Exception:
         logger.exception("❌ Failed to read or validate DEN file. Exiting program.")
-        sys.exit(1)
+        return
 
     # Send create row(s) SDK request to Smartsheet
     try:
         create_new_rows_in_smartsheet(df, smartsheet_cols_map, existing_pairs)
     except Exception:
         logger.exception("❌ Failed to create new row(s) in Smartsheet. Exiting program.")
-        sys.exit(1)
+        return
     
     # Move the read DEN file to the used folder in Box.com
     try:
         move_den_file()
     except:
         logger.exception("❌ Failed to move used DEN file to old folder.")
-        sys.exit(1)
+        return
 
 
 if __name__ == "__main__":
     main()
+    logger.info("Vacancies script finished running.")

@@ -41,6 +41,8 @@ def lambda_handler(event, context):
     else:
         logger.error("❌ Invalid webhook request provided. Not running script. Check the body request.")
 
+    logger.info("Vacancies lambda finished executing.")
+
     return {
         "statusCode": 200,
         "body": json.dumps({
