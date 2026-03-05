@@ -121,7 +121,7 @@ def read_and_validate_den_xls(path: str) -> pd.DataFrame:
     df[required_den_cols] = df[required_den_cols].replace("", pd.NA)
     invalid_rows = df[df[required_den_cols].isna().any(axis=1)]
     for _, row in invalid_rows.iterrows():
-        logger.info(f"🚧 Dropping row from DEN due to missing required field(s): Dept: \'{row.get('Dept')}\', PosID: \'{row.get('PosID')}\', JobClassTitle: \'{row.get('JobClassTitle')}\'")
+        logger.warning(f"🚧 Dropping row from DEN due to missing required field(s): Dept: \'{row.get('Dept')}\', PosID: \'{row.get('PosID')}\', JobClassTitle: \'{row.get('JobClassTitle')}\'")
     df = df.drop(invalid_rows.index)
 
     logger.info("✅ Successfully read and validated DEN file.")
@@ -134,6 +134,7 @@ def read_and_validate_den_xls(path: str) -> pd.DataFrame:
 
 def create_new_rows_in_smartsheet(df: pd.DataFrame, smartsheet_cols_map: dict, existing_pairs: set):
     logger.info(f"Creating {len(df)} new rows in Smartsheet...")
+    dupe_entries_count = 0
 
     today = dt.date.today().strftime("%Y-%m-%d")
     new_rows: Row = []
@@ -144,6 +145,8 @@ def create_new_rows_in_smartsheet(df: pd.DataFrame, smartsheet_cols_map: dict, e
 
         # Remove duplicate entries
         if (dept_id, pos_id) in existing_pairs:
+            dupe_entries_count += 1
+            logger.warning(f"🚧 Duped entry in DEN file. Dept: '{dept_id}', PosID: '{pos_id}'.")
             continue
 
         logger.info(f"Adding new entry to Smartsheet. Dept: '{dept_id}', PosID: '{pos_id}', JobClassTitle: '{job_title}'.")
@@ -159,11 +162,14 @@ def create_new_rows_in_smartsheet(df: pd.DataFrame, smartsheet_cols_map: dict, e
             ]
         }))
 
+    if dupe_entries_count > 0:
+        logger.warning(f"🚧 Found {dupe_entries_count} duped entries within the current DEN file.")
+
     res = sheets_client.add_rows(SMARTSHEET_VACANCIES_TABLE_ID, new_rows)
     if type(res) == smartsheet.models.Error:
         raise RuntimeError(res.result.message)
 
-    logger.info(f"✅ Successfully created {len(df)} new rows in Smartsheet.")
+    logger.info(f"✅ Successfully created {len(df)-dupe_entries_count} new rows in Smartsheet.")
 
 def main():
     # Validate environment variables to ensure they all exists and are valid
