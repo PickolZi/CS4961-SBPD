@@ -27,6 +27,20 @@ Resources:
                     Properties:
                         Path: /separations
                         Method: post
+    VacanciesFunction:
+        Type: AWS::Serverless::Function
+        Properties:
+            CodeUri: Vacancies/
+            Handler: lambda_handler.lambda_handler
+            Runtime: python3.11
+            Architectures:
+                - x86_64
+            Events:
+                HelloWorld:
+                    Type: Api
+                    Properties:
+                        Path: /vacancies
+                        Method: post
     MySecret:
         Type: AWS::SecretsManager::Secret
         Properties:
