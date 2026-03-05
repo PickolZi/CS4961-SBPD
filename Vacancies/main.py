@@ -17,9 +17,10 @@ logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet
 logger = logging.getLogger("vacancies")
 logger.setLevel(logging.INFO)
 
-logger_stream_handler = logging.StreamHandler()
-logger_stream_handler.setFormatter(logging.Formatter("%(asctime)s:[%(levelname)s]:%(message)s"))
-logger.addHandler(logger_stream_handler)
+if STAGE == STAGE_DEV:
+    logger_stream_handler = logging.StreamHandler()
+    logger_stream_handler.setFormatter(logging.Formatter("%(asctime)s:[%(levelname)s]:%(message)s"))
+    logger.addHandler(logger_stream_handler)
 
 sheets_client:Sheets = None
 
