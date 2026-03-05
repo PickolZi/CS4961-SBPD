@@ -34,6 +34,12 @@ def lambda_handler(event, context):
         }
 
     logger.info(f"body: {body}")
+    
+    if body.get("trigger") == "FILE.UPLOADED" and body.get("source", {}).get("name","").endswith(".xls"):
+        logger.info("✅ Valid webhook request provided. Running Vacancies script.")
+        main()
+    else:
+        logger.error("❌ Invalid webhook request provided. Not running script. Check the body request.")
 
     return {
         "statusCode": 200,
