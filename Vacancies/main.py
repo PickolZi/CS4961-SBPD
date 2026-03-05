@@ -1,4 +1,3 @@
-import os
 import sys
 import datetime as dt
 import pandas as pd
@@ -12,7 +11,11 @@ from smartsheet.models.row import Row
 from smartsheet.models.cell import Cell
 
 from box_sdk_gen import BoxClient, BoxDeveloperTokenAuth
-from box_sdk_gen.box.errors import BoxSDKError
+from box_sdk_gen.schemas import Items
+from box_sdk_gen.box.errors import BoxAPIError, BoxSDKError
+from box_sdk_gen.managers.files import UpdateFileByIdParent
+
+from io import BytesIO
 
 from constants import *
 
@@ -25,8 +28,10 @@ if STAGE == STAGE_DEV:
     logger_stream_handler.setFormatter(logging.Formatter("%(asctime)s:[%(levelname)s]:%(message)s"))
     logger.addHandler(logger_stream_handler)
 
-sheets_client:Sheets = None
-box_client: BoxClient = None
+sheets_client:Sheets = None   # loaded by validate_environment_variables()
+box_client: BoxClient = None  # loaded by validate_environment_variables()
+den_id = None                 # loaded by get_den_byte_stream_from_box()
+den_name = None               # loaded by get_den_byte_stream_from_box()
 
 
 def validate_environment_variables():
@@ -39,16 +44,16 @@ def validate_environment_variables():
     if not SMARTSHEET_VACANCIES_TABLE_ID:
         has_error = True
         logger.error("❌ SMARTSHEET_VACANCIES_TABLE_ID is missing/blank.")
-    if not DEN_PATH:
-        has_error = True
-        logger.error("❌ DEN_XLS_PATH is missing/blank.")
-    elif not os.path.exists(DEN_PATH):
-        has_error = True
-        logger.error(f"❌ DEN file not found at: {DEN_PATH}")
 
     if not BOX_ACCESS_TOKEN:
         has_error = True
         logger.error("❌ BOX_ACCESS_TOKEN is missing/blank.")
+    if not BOX_DEN_UPLOAD_FOLDER_ID:
+        has_error = True
+        logger.error("❌ BOX_DEN_UPLOAD_FOLDER_ID is missing/blank.")
+    if not BOX_USED_DEN_FILES_FOLDER_ID:
+        has_error = True
+        logger.error("❌ BOX_USED_DEN_FILES_FOLDER_ID is missing/blank.")
 
     # Smartsheet Sheet SDK Client
     global sheets_client
@@ -121,9 +126,38 @@ def get_existing_pairs(sheet: Sheet, smartsheet_cols_map: dict) -> set:
 
     return existing
 
-def read_and_validate_den_xls(path: str) -> pd.DataFrame:
+def get_den_byte_stream_from_box() -> BytesIO:
+    logger.info("Reading DEN file into memory...")
+
+    try:
+        box_folder:Items = box_client.folders.get_folder_items(BOX_DEN_UPLOAD_FOLDER_ID)
+    except BoxAPIError:
+        raise RuntimeError(f"❌ Failed to read DEN files from Box folder with id: {BOX_DEN_UPLOAD_FOLDER_ID}")
+
+    global den_id
+    global den_name
+    for file in box_folder.entries:
+        if file.name.endswith(".xls"):  # Only do one at a time
+            den_id = file.id
+            den_name = file.name
+
+    if not den_id or not den_name:
+        raise FileNotFoundError(f"❌ Failed to find DEN file in Box folder with id: {BOX_DEN_UPLOAD_FOLDER_ID}")
+
+    try:
+        byte_stream = BytesIO()
+        for chunk in box_client.downloads.download_file(den_id):
+            byte_stream.write(chunk)
+        byte_stream.seek(0)
+    except BoxAPIError:
+        raise RuntimeError(f"❌ Failed to download DEN file with id: '{den_id}' from Box.com.")
+
+    logger.info(f"✅ Successfully read DEN file into memory. DEN id: '{den_id}', DEN name: '{den_name}'")
+    return byte_stream
+
+def read_and_validate_den_xls(byte_stream: BytesIO) -> pd.DataFrame:
     logger.info("Reading and validating incoming DEN file...")
-    df = pd.read_excel(path, converters={'Dept':str, 'PosID':str})
+    df = pd.read_excel(byte_stream, engine="xlrd", converters={'Dept':str, 'PosID':str})
     df.columns = [str(c).strip() for c in df.columns]
 
     # Ensure proper column header names
@@ -189,6 +223,16 @@ def create_new_rows_in_smartsheet(df: pd.DataFrame, smartsheet_cols_map: dict, e
 
     logger.info(f"✅ Successfully created {len(df)-dupe_entries_count} new rows in Smartsheet.")
 
+def move_den_file():
+    logger.info(f"Moving used DEN file: '{den_name}' to used DEN folder: '{BOX_USED_DEN_FILES_FOLDER_ID}'")
+
+    # Append timestamp to DEN name. Lets people know when DEN file was read and DEN names have to be unique per folder.
+    current_datetime = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    new_den_name = f"{current_datetime}-{den_name}"
+    box_client.files.update_file_by_id(den_id, name=new_den_name, parent=UpdateFileByIdParent(id=BOX_USED_DEN_FILES_FOLDER_ID))
+
+    logger.info(f"✅ Successfully moved used DEN file: '{den_name}' to used DEN folder: '{BOX_USED_DEN_FILES_FOLDER_ID}'")
+
 def main():
     # Validate environment variables to ensure they all exists and are valid
     try:
@@ -220,9 +264,16 @@ def main():
         logger.exception(f"❌ Failed to fetch (dept_id, pos_id) pairs from Smartsheet.")
         sys.exit(1)
 
+    # Read DEN file bytestream if it exists from Box.com. Will be passed to the following method.
+    try:
+        byte_stream = get_den_byte_stream_from_box()
+    except Exception as e:
+        logger.exception(e)
+        sys.exit(1)
+
     # Read DEN file and make sure it has the appropriate data
     try:
-        df = read_and_validate_den_xls(DEN_PATH)
+        df = read_and_validate_den_xls(byte_stream)
     except Exception:
         logger.exception("❌ Failed to read or validate DEN file. Exiting program.")
         sys.exit(1)
@@ -232,6 +283,13 @@ def main():
         create_new_rows_in_smartsheet(df, smartsheet_cols_map, existing_pairs)
     except Exception:
         logger.exception("❌ Failed to create new row(s) in Smartsheet. Exiting program.")
+        sys.exit(1)
+    
+    # Move the read DEN file to the used folder in Box.com
+    try:
+        move_den_file()
+    except:
+        logger.exception("❌ Failed to move used DEN file to old folder.")
         sys.exit(1)
 
 
