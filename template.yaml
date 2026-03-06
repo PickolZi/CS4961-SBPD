@@ -11,6 +11,7 @@ Globals:
                 SMARTSHEET_ACCESS_TOKEN: !Ref MySecret
                 BOX_ACCESS_TOKEN: !Ref MySecret
                 GMAIL_APP_PASSWORD: !Ref MySecret
+                SBPD_STAGE: PROD
 
 Resources:
     SeparationsFunction:
@@ -27,6 +28,8 @@ Resources:
                     Properties:
                         Path: /separations
                         Method: post
+            Layers:
+                - !Ref CommonDependenciesLayer
     VacanciesFunction:
         Type: AWS::Serverless::Function
         Properties:
@@ -41,6 +44,16 @@ Resources:
                     Properties:
                         Path: /vacancies
                         Method: post
+            Layers:
+                - !Ref CommonDependenciesLayer
+    CommonDependenciesLayer:
+        Type: AWS::Serverless::LayerVersion
+        Properties:
+            ContentUri: layers/python-dependencies/
+            CompatibleRuntimes:
+                - python3.11
+        Metadata:
+            BuildMethod: python3.11
     MySecret:
         Type: AWS::SecretsManager::Secret
         Properties:
