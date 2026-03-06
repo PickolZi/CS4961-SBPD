@@ -180,6 +180,16 @@ def read_and_validate_den_xls(byte_stream: BytesIO) -> pd.DataFrame:
 
     return df
 
+def move_invalid_den_file():
+    logger.info(f"Moving invalid DEN file: '{den_name}' to invalid DEN folder: '{BOX_INVALID_DEN_FILES_FOLDER_ID}'...")
+
+    # Append timestamp to DEN name. Lets people know when DEN file was read and DEN names have to be unique per folder.
+    current_datetime = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    new_den_name = f"{current_datetime}-{den_name}"
+    box_client.files.update_file_by_id(den_id, name=new_den_name, parent=UpdateFileByIdParent(id=BOX_INVALID_DEN_FILES_FOLDER_ID))
+
+    logger.info(f"✅ Successfully moved invalid DEN file: '{den_name}' to invalid DEN folder: '{BOX_INVALID_DEN_FILES_FOLDER_ID}'")
+
 def create_new_rows_in_smartsheet(df: pd.DataFrame, smartsheet_cols_map: dict, existing_pairs: set):
     logger.info(f"Creating {len(df)} new rows in Smartsheet...")
     dupe_entries_count = 0
@@ -275,6 +285,10 @@ def main():
             return
     except Exception:
         logger.exception("❌ Failed to read or validate DEN file. Exiting program.")
+        try:
+            move_invalid_den_file()
+        except:
+            logger.exception(f"❌ Failed to move invalid DEN file: '{den_name}' to folder: {BOX_INVALID_DEN_FILES_FOLDER_ID}")
         return
 
     # Send create row(s) SDK request to Smartsheet
