@@ -17,7 +17,7 @@ from models import BoxFolder, BoxFile, SmartsheetContact
 from boxnote_to_html_parser.html_parser import convert_boxnote_to_html
 from email_manager import EmailManager
 from helpers.regex import replace_email_template_placeholders
-from constants import *
+from constants import API_ACCESS_TOKENS, EMAIL_SETTINGS, BOX_CONSTANTS, SMARTSHEET_CONSTANTS, BUSINESS_LOGIC_CONSTANTS
 
 """
 Separations Script.
@@ -39,9 +39,10 @@ logger = logging.getLogger("separations")
 logger.setLevel(logging.INFO)
 
 
+## do we need to take in an arg here? it isnt used
 def get_smartsheet_sheet_client(access_token: str) -> Sheets:
     logger.info(f"Fetching Smartsheet client...")
-    smartsheet_client = smartsheet.Smartsheet(SMARTSHEET_ACCESS_TOKEN)
+    smartsheet_client = smartsheet.Smartsheet(API_ACCESS_TOKENS['smartsheet_access_token'])
     sheet_client = Sheets(smartsheet_client)
 
     # Test API call because no error is thrown when connection fails.
@@ -54,6 +55,7 @@ def get_smartsheet_sheet_client(access_token: str) -> Sheets:
     logger.info(f"✅ Successfully fetched Smartsheet client")
     return sheet_client
 
+## in the previous func we ignore the arg but then use the constant, can we also ignore here and drop both functions' args?
 def get_box_client(box_developer_token: str) -> BoxClient:
     logger.info(f"Fetching Box client...")
 
@@ -75,17 +77,17 @@ def generate_missing_payroll_dates_in_smartsheet(sheet_client: Sheets):
 
     # Fetch contacts with status 'awaiting email'
     contacts = []  # [(row_id:int, last_day_date:date)]
-    res: Sheet = sheet_client.get_sheet(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID)
+    res: Sheet = sheet_client.get_sheet(SMARTSHEET_CONSTANTS['separations_tracker_table_id'])
     for row in res.to_dict().get("rows", []):
         row_id = row.get("id")
         last_day_date = None
         email_status = None
         for cell in row.get("cells", []):
-            if cell.get("columnId") == SMARTSHEET_COLUMN_LAST_DAY_DATE_ID:
+            if cell.get("columnId") == SMARTSHEET_CONSTANTS['column_last_day_date_id']:
                 last_day_date = date.fromisoformat(cell.get("value"))
-            if cell.get("columnId") == SMARTSHEET_COLUMN_EMAIL_STATUS_ID:
+            if cell.get("columnId") == SMARTSHEET_CONSTANTS['column_email_status_id']:
                 email_status = cell.get("value")
-        if email_status == SMARTSHEET_EMAIL_AWAITING_EMAIL_STATUS:
+        if email_status == SMARTSHEET_CONSTANTS['email_awaiting_status']:
             contacts.append((row_id, last_day_date))
     
     if len(contacts) == 0:
@@ -95,13 +97,13 @@ def generate_missing_payroll_dates_in_smartsheet(sheet_client: Sheets):
 
     # Fetch SBPD recognized holidays
     logger.info(f"Fetching SBPD recognized holiday dates from Smartsheet...")
-    holiday_sheet: Sheet = sheet_client.get_sheet(SMARTSHEET_HOLIDAY_TABLE_ID)
+    holiday_sheet: Sheet = sheet_client.get_sheet(SMARTSHEET_CONSTANTS['holiday_table_id'])
     holiday_sheet_dict = holiday_sheet.to_dict()
     upcoming_holiday_dates: list[date] = []
     for row in holiday_sheet_dict.get("rows", []):
         cells = row.get("cells", [])
         for cell in cells:
-            if cell.get("columnId") in [SMARTSHEET_HOLIDAY_PREVIOUS_DATES_COLUMN_ID, SMARTSHEET_HOLIDAY_UPCOMING_DATES_COLUMN_ID] :
+            if cell.get("columnId") in [SMARTSHEET_CONSTANTS['holiday_previous_dates_column_id'], SMARTSHEET_CONSTANTS['holiday_upcoming_dates_column_id']]:
                 try:
                     upcoming_holiday_dates.append(date.fromisoformat(cell.get("value")))
                 except ValueError:
@@ -113,9 +115,9 @@ def generate_missing_payroll_dates_in_smartsheet(sheet_client: Sheets):
     rows_to_update = []
     for contact in contacts:
         contact_last_day: date = contact[1]
-        days_since_epoch: timedelta = contact_last_day - PAYROLL_START_DATE_EPOCH
+        days_since_epoch: timedelta = contact_last_day - BUSINESS_LOGIC_CONSTANTS['payroll_start_date_epoch']
         days_diff = days_since_epoch - timedelta(days=days_since_epoch.days % 14)
-        new_payroll_start_date = PAYROLL_START_DATE_EPOCH + days_diff
+        new_payroll_start_date = BUSINESS_LOGIC_CONSTANTS['payroll_start_date_epoch'] + days_diff
         new_payroll_end_date = new_payroll_start_date + timedelta(days=13)
         new_payroll_pay_date = new_payroll_end_date + timedelta(days=11)
 
@@ -154,14 +156,14 @@ def generate_missing_payroll_dates_in_smartsheet(sheet_client: Sheets):
                 ]
         }))
 
-    sheet_client.update_rows(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID, rows_to_update)
+    sheet_client.update_rows(SMARTSHEET_CONSTANTS['separations_tracker_table_id'], rows_to_update)
     logger.info(f"✅ Successfully generated payroll dates for separating contacts.")
 
 def retrieve_separating_contacts_from_smartsheet(sheet_client: Sheets) -> List[SmartsheetContact]:
     logger.info(f"Retrieving separating employees from Smartsheet...")
 
     filtered_smartsheet_separating_contacts = list()
-    res: Sheet = sheet_client.get_sheet(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID)
+    res: Sheet = sheet_client.get_sheet(SMARTSHEET_CONSTANTS['separations_tracker_table_id'])
     smartsheet_json: dict = res.to_dict()
 
     # TODO: Add null checks AND error handling is really bad here. Really, come back and redo it soon. And in the main function part.
@@ -177,9 +179,9 @@ def retrieve_separating_contacts_from_smartsheet(sheet_client: Sheets) -> List[S
             cell_id = cell.get("columnId")
             cell_value = cell.get("value")
 
-            if cell_id in SMARTSHEET_REQUIRED_COLUMN_TITLES_MAP:
-                contact_dict[SMARTSHEET_REQUIRED_COLUMN_TITLES_MAP[cell_id]] = cell_value  # SmartsheetContact must have these 3 attributes for its model
-            contact_dict[smartsheet_extra_column_titles_map[cell_id]] = cell_value     # Every other additional column they add in smartsheet
+            if cell_id in SMARTSHEET_CONSTANTS['required_column_titles_map']:
+                contact_dict[SMARTSHEET_CONSTANTS['required_column_titles_map'][cell_id]] = cell_value
+            contact_dict[smartsheet_extra_column_titles_map[cell_id]] = cell_value
         
         # These 3 attributes must exist
         email_status = contact_dict.get("email_status")
@@ -199,39 +201,39 @@ def download_attachments_and_email_template_from_box(box_client: BoxClient):
     logger.info(f"Downloading attachments and email template from Box.com...")
 
     # Ensure proper _box_sync folder structure exists, if not, create it.
-    if not BOX_SYNC_FOLDER_PATH.exists():
-        logger.info(f"  {BOX_SYNC_FOLDER_PATH} does not exist. Creating it now...")
-        BOX_SYNC_FOLDER_PATH.mkdir()
-    if not BOX_SYNC_ATTACHMENTS_FOLDER_PATH.exists():
-        logger.info(f"  {BOX_SYNC_ATTACHMENTS_FOLDER_PATH} does not exist. Creating it now...")
-        BOX_SYNC_ATTACHMENTS_FOLDER_PATH.mkdir()
-    if not BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH.exists():
-        logger.info(f"  {BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH} does not exist. Creating it now...")
-        BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH.mkdir()
+    if not BOX_CONSTANTS['sync_folder_path'].exists():
+        logger.info(f"  {BOX_CONSTANTS['sync_folder_path']} does not exist. Creating it now...")
+        BOX_CONSTANTS['sync_folder_path'].mkdir()
+    if not BOX_CONSTANTS['attachments_folder_path'].exists():
+        logger.info(f"  {BOX_CONSTANTS['attachments_folder_path']} does not exist. Creating it now...")
+        BOX_CONSTANTS['attachments_folder_path'].mkdir()
+    if not BOX_CONSTANTS['email_template_folder_path'].exists():
+        logger.info(f"  {BOX_CONSTANTS['email_template_folder_path']} does not exist. Creating it now...")
+        BOX_CONSTANTS['email_template_folder_path'].mkdir()
 
     # Save attachments metadata from Box.com
-    box_attachments_folder: BoxFolder = BoxFolder(BOX_IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID)
-    for entry in box_client.folders.get_folder_items(BOX_IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID).entries:
+    box_attachments_folder: BoxFolder = BoxFolder(BOX_CONSTANTS['attachments_folder_id'])
+    for entry in box_client.folders.get_folder_items(BOX_CONSTANTS['attachments_folder_id']).entries:
         box_file: BoxFile = BoxFile(entry.id, entry.name, entry.file_version.id, entry.sha_1)
         box_attachments_folder.contents.append(box_file)
 
     # FEATURE: Instead of constantly re-downloading attachments and email template, we can have a manifest.json to save the id and etag of our previous version and only pull from Box.com when the manifest.json files change.
-    logger.info(f"Downloading files to this location: {BOX_SYNC_ATTACHMENTS_FOLDER_PATH}")
+    logger.info(f"Downloading files to this location: {BOX_CONSTANTS['attachments_folder_path']}")
     for idx, box_file in enumerate(box_attachments_folder.contents):
         counter = f"({idx+1}/{len(box_attachments_folder.contents)})"
-        box_attachment_path = BOX_SYNC_ATTACHMENTS_FOLDER_PATH / Path(box_file.name)
+        box_attachment_path = BOX_CONSTANTS['attachments_folder_path'] / Path(box_file.name)
         with open(box_attachment_path, "wb") as f:
             logger.info(f"  {counter} Downloading Box attachment: {box_file.name}...")
-            box_client.downloads.download_file_to_output_stream(box_file.id, f)  # Downloads each Box.com attachment
+            box_client.downloads.download_file_to_output_stream(box_file.id, f)
 
     # Download email template(.boxnote extension)
-    with open(EMAIL_TEMPLATE_BOXNOTE_PATH, "wb") as f:
-        logger.info(f"  Downloading email attachment: {EMAIL_TEMPLATE_BOXNOTE_FILENAME}...")
-        box_client.downloads.download_file_to_output_stream(BOX_EMAIL_TEMPLATE_FILE_ID, f)  # Downloads Box.com email_template(.boxnote)
+    with open(BOX_CONSTANTS['email_template_boxnote_path'], "wb") as f:
+        logger.info(f"  Downloading email attachment: email_template.boxnote...")
+        box_client.downloads.download_file_to_output_stream(BOX_CONSTANTS['email_template_file_id'], f)
 
     # TODO: Look over image converting from boxnote to html as that might be broken/is untested.
     logger.info(f"  Converting email template from boxnote to HTML format...")
-    convert_boxnote_to_html(EMAIL_TEMPLATE_BOXNOTE_PATH, BOX_DEVELOPER_TOKEN, EMAIL_TEMPLATE_HTML_PATH)
+    convert_boxnote_to_html(BOX_CONSTANTS['email_template_boxnote_path'], API_ACCESS_TOKENS['box_developer_token'], BOX_CONSTANTS['email_template_html_path'])
 
     logger.info("✅ Successfully downloaded attachments and email template from Box.com.")
 
@@ -242,20 +244,25 @@ def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]) ->
     separating_contacts_failed_list: list[SmartsheetContact] = list()
 
     # Read email template
-    with open(EMAIL_TEMPLATE_HTML_PATH, "r", encoding='utf-8') as f:
+    with open(BOX_CONSTANTS['email_template_html_path'], "r", encoding='utf-8') as f:
         email_template = f.read()
 
     if not email_template:
         raise Exception("HTML Email template could not be found.")
 
-    email_manager = EmailManager(EMAIL_SMTP_SERVER, EMAIL_PORT, EMAIL_SENDER_ADDRESS, EMAIL_SENDER_APP_PASSWORD)
+    email_manager = EmailManager(
+        EMAIL_SETTINGS['email_smtp_server'],
+        EMAIL_SETTINGS['email_port'],
+        EMAIL_SETTINGS['email_sender_address'],
+        EMAIL_SETTINGS['email_sender_app_password']
+    )
 
     for idx, contact in enumerate(contacts):
         counter = f"{idx+1}/{len(contacts)}"
         try:
             logger.info(f"  ({counter}) Sending separation email to: {contact.email}")
             custom_email = replace_email_template_placeholders(email_template, contact)
-            email_manager.send_email(contact.email, EMAIL_SUBJECT, None, custom_email, BOX_SYNC_ATTACHMENTS_FOLDER_PATH)
+            email_manager.send_email(contact.email, EMAIL_SETTINGS['email_subject'], None, custom_email, BOX_CONSTANTS['attachments_folder_path'])
             separating_contacts_success_list.append(contact)
         except Exception as e:
             # TODO: error map to keep track of failed emails
@@ -268,22 +275,22 @@ def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]) ->
 def delete_attachments_and_email_templates():
     logger.info(f"Cleaning up downloaded files...")
 
-    if BOX_SYNC_FOLDER_PATH.exists():
-        logger.info(f"  removing files from directory: {BOX_SYNC_FOLDER_PATH}")
+    if BOX_CONSTANTS['sync_folder_path'].exists():
+        logger.info(f"  removing files from directory: {BOX_CONSTANTS['sync_folder_path']}")
     else:
         raise Exception("_box_sync folder does not exist when it should.")
 
-    if BOX_SYNC_ATTACHMENTS_FOLDER_PATH.exists():
-        for filename in os.listdir(BOX_SYNC_ATTACHMENTS_FOLDER_PATH):
-            filepath = os.path.join(BOX_SYNC_ATTACHMENTS_FOLDER_PATH, filename)
+    if BOX_CONSTANTS['attachments_folder_path'].exists():
+        for filename in os.listdir(BOX_CONSTANTS['attachments_folder_path']):
+            filepath = os.path.join(BOX_CONSTANTS['attachments_folder_path'], filename)
             logger.info(f"  removing file: {filename}")
             os.remove(filepath)
     else:
         raise Exception("_box_sync/attachments folder does not exist when it should.")
     
-    if BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH.exists():
-        for filename in os.listdir(BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH):
-            filepath = os.path.join(BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH, filename)
+    if BOX_CONSTANTS['email_template_folder_path'].exists():
+        for filename in os.listdir(BOX_CONSTANTS['email_template_folder_path']):
+            filepath = os.path.join(BOX_CONSTANTS['email_template_folder_path'], filename)
             logger.info(f"  removing file: {filename}")
             os.remove(filepath)
     else:
@@ -295,8 +302,8 @@ def update_separation_contacts_email_status(sheet_client: Sheets, contacts: list
     logger.info(f"Updating Separation contacts status to 'email sent'...")
 
     new_cell = smartsheet.models.Cell()
-    new_cell.column_id = SMARTSHEET_COLUMN_EMAIL_STATUS_ID
-    new_cell.value = SMARTSHEET_EMAIL_EMAIL_SENT_STATUS
+    new_cell.column_id = SMARTSHEET_CONSTANTS['column_email_status_id']
+    new_cell.value = SMARTSHEET_CONSTANTS['email_sent_status']
 
     rows_to_update: List[smartsheet.models.Row] = list()
     for contact in contacts:
@@ -305,20 +312,18 @@ def update_separation_contacts_email_status(sheet_client: Sheets, contacts: list
         row.cells.append(new_cell)
         rows_to_update.append(row)
 
-    response = sheet_client.update_rows(SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID, rows_to_update)
+    response = sheet_client.update_rows(SMARTSHEET_CONSTANTS['separations_tracker_table_id'], rows_to_update)
     logger.info(f"✅ Successfully updated Separation contacts.")
 
 
 def main():
     # Get Smartsheet and Box client
     try:
-        sheet_client: Sheets = get_smartsheet_sheet_client(SMARTSHEET_ACCESS_TOKEN)
-        box_client: BoxClient = get_box_client(BOX_DEVELOPER_TOKEN)
+        sheet_client: Sheets = get_smartsheet_sheet_client(API_ACCESS_TOKENS['smartsheet_access_token'])
+        box_client: BoxClient = get_box_client(API_ACCESS_TOKENS['box_developer_token'])
     except Exception as e:
         logger.exception(f"❌ Failed to fetch Smartsheet/Box.com SDK Client.")
         sys.exit(1)
-    
-    # TODO: Check if recognized holiday sheets need an update
 
     # Generate missing payroll dates for 'awaiting email' rows, else update status to 'missing fields'
     try:
@@ -330,7 +335,7 @@ def main():
     # Retrieve all separating contacts from Smartsheet
     try:
         smartsheet_separating_contacts = retrieve_separating_contacts_from_smartsheet(sheet_client)
-        filtered_smartsheet_separating_contacts = list(filter(lambda contact: contact.email_status.lower() == SMARTSHEET_EMAIL_AWAITING_EMAIL_STATUS, smartsheet_separating_contacts))
+        filtered_smartsheet_separating_contacts = list(filter(lambda contact: contact.email_status.lower() == SMARTSHEET_CONSTANTS['email_awaiting_status'], smartsheet_separating_contacts))
 
         if len(filtered_smartsheet_separating_contacts) == 0:
             logger.info(f"There are no employees who are waiting for their automated email. Exiting program.")
