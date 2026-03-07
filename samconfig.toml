@@ -19,7 +19,6 @@ confirm_changeset = true
 resolve_s3 = true
 stack_name = "SBPD"
 s3_prefix = "SBPD"
-region = "us-east-1"
 image_repositories = []
 
 [default.package.parameters]
