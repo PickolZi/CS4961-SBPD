@@ -17,6 +17,9 @@ from box_sdk_gen.managers.files import UpdateFileByIdParent
 
 from io import BytesIO
 
+sys.path.append("../layers/shared-config/python/")  # Necessary for DEV staging. AWS auto imports this file
+from shared_config.secrets import get_secret
+
 from constants import *
 
 logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
@@ -37,6 +40,9 @@ den_name = None               # loaded by get_den_byte_stream_from_box()
 def validate_environment_variables():
     logger.info("Validating integrity of environment variables...")
     has_error = False
+
+    SMARTSHEET_ACCESS_TOKEN = get_secret("SMARTSHEET_ACCESS_TOKEN")
+    BOX_ACCESS_TOKEN = get_secret("BOX_ACCESS_TOKEN")
 
     if not SMARTSHEET_ACCESS_TOKEN:
         has_error = True

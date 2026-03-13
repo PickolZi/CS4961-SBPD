@@ -22,6 +22,9 @@ Resources:
             Runtime: python3.11
             Architectures:
                 - x86_64
+            Policies:
+                - AWSSecretsManagerGetSecretValuePolicy:
+                      SecretArn: !Ref MySecret
             Events:
                 HelloWorld:
                     Type: Api
@@ -30,6 +33,7 @@ Resources:
                         Method: post
             Layers:
                 - !Ref CommonDependenciesLayer
+                - !Ref ConfigurationDependenciesLayer
     VacanciesFunction:
         Type: AWS::Serverless::Function
         Properties:
@@ -38,6 +42,9 @@ Resources:
             Runtime: python3.11
             Architectures:
                 - x86_64
+            Policies:
+                - AWSSecretsManagerGetSecretValuePolicy:
+                      SecretArn: !Ref MySecret
             Events:
                 HelloWorld:
                     Type: Api
@@ -46,6 +53,7 @@ Resources:
                         Method: post
             Layers:
                 - !Ref CommonDependenciesLayer
+                - !Ref ConfigurationDependenciesLayer
     CommonDependenciesLayer:
         Type: AWS::Serverless::LayerVersion
         Properties:
@@ -54,6 +62,12 @@ Resources:
                 - python3.11
         Metadata:
             BuildMethod: python3.11
+    ConfigurationDependenciesLayer:
+        Type: AWS::Serverless::LayerVersion
+        Properties:
+            ContentUri: layers/shared-config/python.zip
+            CompatibleRuntimes:
+                - python3.11
     MySecret:
         Type: AWS::SecretsManager::Secret
         Properties:

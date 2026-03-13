@@ -1,0 +1,3 @@
+
+
+AWS_SECRETS_MANAGER_SECRET_NAME = "prod/sbpd-csula"
