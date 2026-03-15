@@ -1,3 +1,18 @@
+"""
+Separations Script.
+1. Read Smartsheet and filter for employees departing from SBPD
+2. Read Box repo for custom separations email and its attachment
+3. Send customized email to each employee
+4. Update status in Smartsheet for successful/failed workflows
+
+Requirements:
+- Smartsheet library (install with: `pip install smartsheet-python-sdk` or `pip install -r requirements.txt`)
+- Smartsheet API Key (Can be created in Apps & Integrations)
+- boxsdk library (install with: `pip install boxsdk` or `pip install -r requirements.txt`)
+- Box application credentials (Developer Token for testing or JWT/OAuth for production)
+- GMAIL App Password (App password, not account password. Can be created here: https://myaccount.google.com/apppasswords)
+"""
+
 import sys
 import os
 import logging
@@ -19,27 +34,16 @@ from email_manager import EmailManager
 from helpers.regex import replace_email_template_placeholders
 from constants import *
 
-"""
-Separations Script.
-1. Read Smartsheet and filter for employees departing from SBPD
-2. Read Box repo for custom separations email and its attachment
-3. Send customized email to each employee
-4. Update status in Smartsheet for successful/failed workflows
 
-Requirements:
-- Smartsheet library (install with: `pip install smartsheet-python-sdk` or `pip install -r requirements.txt`)
-- Smartsheet API Key (Can be created in Apps & Integrations)
-- boxsdk library (install with: `pip install boxsdk` or `pip install -r requirements.txt`)
-- Box application credentials (Developer Token for testing or JWT/OAuth for production)
-- GMAIL App Password (App password, not account password. Can be created here: https://myaccount.google.com/apppasswords)
-"""
 
 logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
 logger = logging.getLogger("separations")
 logger.setLevel(logging.INFO)
 
 
-def get_smartsheet_sheet_client(access_token: str) -> Sheets:
+
+#removed unused arg for both of the next gets; we use global constants instead
+def get_smartsheet_sheet_client() -> Sheets:
     logger.info(f"Fetching Smartsheet client...")
     smartsheet_client = smartsheet.Smartsheet(SMARTSHEET_ACCESS_TOKEN)
     sheet_client = Sheets(smartsheet_client)
@@ -47,17 +51,18 @@ def get_smartsheet_sheet_client(access_token: str) -> Sheets:
     # Test API call because no error is thrown when connection fails.
     response:IndexResult = sheet_client.list_sheets()
     if type(response) == smartsheet.models.error.Error:
-        err_code = response.result.error_code
+        # TODO: do we need this err_code or is it safe to delete
+        #err_code = response.result.error_code
         err_message = response.result.message
         raise RuntimeError(err_message)
 
     logger.info(f"✅ Successfully fetched Smartsheet client")
     return sheet_client
 
-def get_box_client(box_developer_token: str) -> BoxClient:
+def get_box_client() -> BoxClient:
     logger.info(f"Fetching Box client...")
 
-    auth: BoxDeveloperTokenAuth = BoxDeveloperTokenAuth(box_developer_token)
+    auth: BoxDeveloperTokenAuth = BoxDeveloperTokenAuth(BOX_DEVELOPER_TOKEN)
     box_client: BoxClient = BoxClient(auth)
 
     try:
@@ -90,7 +95,8 @@ def generate_missing_payroll_dates_in_smartsheet(sheet_client: Sheets):
     
     if len(contacts) == 0:
         logger.info("Smartsheet had 0 employees with the 'awaiting email' status. Exiting program.")
-        sys.exit(1)
+        # In vacancies, we changed this exit to a raise, standardizing here 
+        raise RuntimeError("Smartsheet had 0 employees with the 'awaiting email' status.")
     logger.info(f"Smartsheet found {len(contacts)} employees to generate payroll dates.")
 
     # Fetch SBPD recognized holidays
@@ -312,8 +318,8 @@ def update_separation_contacts_email_status(sheet_client: Sheets, contacts: list
 def main():
     # Get Smartsheet and Box client
     try:
-        sheet_client: Sheets = get_smartsheet_sheet_client(SMARTSHEET_ACCESS_TOKEN)
-        box_client: BoxClient = get_box_client(BOX_DEVELOPER_TOKEN)
+        sheet_client: Sheets = get_smartsheet_sheet_client()
+        box_client: BoxClient = get_box_client()
     except Exception as e:
         logger.exception(f"❌ Failed to fetch Smartsheet/Box.com SDK Client.")
         sys.exit(1)
