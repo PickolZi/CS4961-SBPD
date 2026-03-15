@@ -20,13 +20,13 @@ sys.path.append("../layers/shared-config/python/")  # Necessary for DEV staging.
 from shared_config.secrets import get_secret
 from api import get_smartsheet_client, get_box_client
 
-from constants import *
+from ..constants_master import Vacancies
 
 logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
 logger = logging.getLogger("vacancies")
 logger.setLevel(logging.INFO)
 
-if STAGE == STAGE_DEV:
+if Vacancies.Settings.STAGE.value == Vacancies.Settings.STAGE_DEV.value:
     logger_stream_handler = logging.StreamHandler()
     logger_stream_handler.setFormatter(logging.Formatter("%(asctime)s:[%(levelname)s]:%(message)s"))
     logger.addHandler(logger_stream_handler)
@@ -41,14 +41,23 @@ def validate_environment_variables():
     logger.info("Validating integrity of environment variables...")
     has_error = False
 
-    if not SMARTSHEET_VACANCIES_TABLE_ID:
+    SMARTSHEET_ACCESS_TOKEN = get_secret("SMARTSHEET_ACCESS_TOKEN")
+    BOX_ACCESS_TOKEN = get_secret("BOX_ACCESS_TOKEN")
+
+    if not SMARTSHEET_ACCESS_TOKEN:
+        has_error = True
+        logger.error("❌ SMARTSHEET_ACCESS_TOKEN is missing/blank.")
+    if not Vacancies.Smartsheet.VACANCIES_TABLE_ID.value:
         has_error = True
         logger.error("❌ SMARTSHEET_VACANCIES_TABLE_ID is missing/blank.")
 
-    if not BOX_DEN_UPLOAD_FOLDER_ID:
+    if not BOX_ACCESS_TOKEN:
+        has_error = True
+        logger.error("❌ BOX_ACCESS_TOKEN is missing/blank.")
+    if not Vacancies.Box.DEN_UPLOAD_FOLDER_ID.value:
         has_error = True
         logger.error("❌ BOX_DEN_UPLOAD_FOLDER_ID is missing/blank.")
-    if not BOX_USED_DEN_FILES_FOLDER_ID:
+    if not Vacancies.Box.USED_DEN_FILES_FOLDER_ID.value:
         has_error = True
         logger.error("❌ BOX_USED_DEN_FILES_FOLDER_ID is missing/blank.")
 
@@ -114,9 +123,9 @@ def get_den_byte_stream_from_box() -> BytesIO:
     logger.info("Reading DEN file into memory...")
 
     try:
-        box_folder:Items = box_client.folders.get_folder_items(BOX_DEN_UPLOAD_FOLDER_ID)
+        box_folder:Items = box_client.folders.get_folder_items(Vacancies.Box.DEN_UPLOAD_FOLDER_ID.value)
     except BoxAPIError:
-        raise RuntimeError(f"❌ Failed to read DEN files from Box folder with id: {BOX_DEN_UPLOAD_FOLDER_ID}")
+        raise RuntimeError(f"❌ Failed to read DEN files from Box folder with id: {Vacancies.Box.DEN_UPLOAD_FOLDER_ID.value}")
 
     global den_id
     global den_name
@@ -126,7 +135,7 @@ def get_den_byte_stream_from_box() -> BytesIO:
             den_name = file.name
 
     if not den_id or not den_name:
-        raise FileNotFoundError(f"❌ Failed to find DEN file in Box folder with id: {BOX_DEN_UPLOAD_FOLDER_ID}")
+        raise FileNotFoundError(f"❌ Failed to find DEN file in Box folder with id: {Vacancies.Box.DEN_UPLOAD_FOLDER_ID.value}")
 
     try:
         byte_stream = BytesIO()
@@ -165,14 +174,14 @@ def read_and_validate_den_xls(byte_stream: BytesIO) -> pd.DataFrame:
     return df
 
 def move_invalid_den_file():
-    logger.info(f"Moving invalid DEN file: '{den_name}' to invalid DEN folder: '{BOX_INVALID_DEN_FILES_FOLDER_ID}'...")
+    logger.info(f"Moving invalid DEN file: '{den_name}' to invalid DEN folder: '{Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID.value}'...")
 
     # Append timestamp to DEN name. Lets people know when DEN file was read and DEN names have to be unique per folder.
     current_datetime = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     new_den_name = f"{current_datetime}-{den_name}"
-    box_client.files.update_file_by_id(den_id, name=new_den_name, parent=UpdateFileByIdParent(id=BOX_INVALID_DEN_FILES_FOLDER_ID))
+    box_client.files.update_file_by_id(den_id, name=new_den_name, parent=UpdateFileByIdParent(id=Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID.value))
 
-    logger.info(f"✅ Successfully moved invalid DEN file: '{den_name}' to invalid DEN folder: '{BOX_INVALID_DEN_FILES_FOLDER_ID}'")
+    logger.info(f"✅ Successfully moved invalid DEN file: '{den_name}' to invalid DEN folder: '{Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID.value}'")
 
 def create_new_rows_in_smartsheet(df: pd.DataFrame, smartsheet_cols_map: dict, existing_pairs: set):
     logger.info(f"Creating {len(df)} new rows in Smartsheet...")
@@ -207,21 +216,21 @@ def create_new_rows_in_smartsheet(df: pd.DataFrame, smartsheet_cols_map: dict, e
     if dupe_entries_count > 0:
         logger.warning(f"🚧 Found {dupe_entries_count} duped entries within the current DEN file.")
 
-    res = sheets_client.add_rows(SMARTSHEET_VACANCIES_TABLE_ID, new_rows)
+    res = sheets_client.add_rows(Vacancies.Smartsheet.VACANCIES_TABLE_ID.value, new_rows)
     if type(res) == smartsheet.models.Error:
         raise RuntimeError(res.result.message)
 
     logger.info(f"✅ Successfully created {len(df)-dupe_entries_count} new rows in Smartsheet.")
 
 def move_den_file():
-    logger.info(f"Moving used DEN file: '{den_name}' to used DEN folder: '{BOX_USED_DEN_FILES_FOLDER_ID}'")
+    logger.info(f"Moving used DEN file: '{den_name}' to used DEN folder: '{Vacancies.Box.USED_DEN_FILES_FOLDER_ID.value}'")
 
     # Append timestamp to DEN name. Lets people know when DEN file was read and DEN names have to be unique per folder.
     current_datetime = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     new_den_name = f"{current_datetime}-{den_name}"
-    box_client.files.update_file_by_id(den_id, name=new_den_name, parent=UpdateFileByIdParent(id=BOX_USED_DEN_FILES_FOLDER_ID))
+    box_client.files.update_file_by_id(den_id, name=new_den_name, parent=UpdateFileByIdParent(id=Vacancies.Box.USED_DEN_FILES_FOLDER_ID.value))
 
-    logger.info(f"✅ Successfully moved used DEN file: '{den_name}' to used DEN folder: '{BOX_USED_DEN_FILES_FOLDER_ID}'")
+    logger.info(f"✅ Successfully moved used DEN file: '{den_name}' to used DEN folder: '{Vacancies.Box.USED_DEN_FILES_FOLDER_ID.value}'")
 
 def main():
     # Validate environment variables to ensure they all exists and are valid
@@ -233,9 +242,9 @@ def main():
 
     # Retrieve Vacancies & Recruitment sheet from Smartsheet
     try:
-        sheet = get_sheet(SMARTSHEET_VACANCIES_TABLE_ID)
+        sheet = get_sheet(Vacancies.Smartsheet.VACANCIES_TABLE_ID.value)
     except:
-        logger.exception(f"❌ Failed to retrieve Vacancies & Recruitment sheet from Smartsheet with id: '{SMARTSHEET_VACANCIES_TABLE_ID}'.")
+        logger.exception(f"❌ Failed to retrieve Vacancies & Recruitment sheet from Smartsheet with id: '{Vacancies.Smartsheet.VACANCIES_TABLE_ID.value}'.")
         return
 
     smartsheet_cols_map = {col.title.strip(): col.id for col in sheet.columns.to_list()}
@@ -244,12 +253,12 @@ def main():
     try:
         validate_smartsheet_column_names(sheet, smartsheet_cols_map)
     except Exception:
-        logger.exception(f"❌ Smartsheet sheet with id: '{SMARTSHEET_VACANCIES_TABLE_ID}' is missing crucial columns.")
+        logger.exception(f"❌ Smartsheet sheet with id: '{Vacancies.Smartsheet.VACANCIES_TABLE_ID.value}' is missing crucial columns.")
         return
 
     # Create map of (dept_id, pos_id) pairs to compare with incoming DEN file to not have duplicates.
     try:
-        existing_pairs = get_existing_pairs(sheet, smartsheet_cols_map)  # (dept_id, pos_id)
+        existing_pairs = get_existing_pairs(sheet, smartsheet_cols_map)
     except Exception:
         logger.exception(f"❌ Failed to fetch (dept_id, pos_id) pairs from Smartsheet.")
         return
@@ -272,7 +281,7 @@ def main():
         try:
             move_invalid_den_file()
         except:
-            logger.exception(f"❌ Failed to move invalid DEN file: '{den_name}' to folder: {BOX_INVALID_DEN_FILES_FOLDER_ID}")
+            logger.exception(f"❌ Failed to move invalid DEN file: '{den_name}' to folder: {Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID.value}")
         return
 
     # Send create row(s) SDK request to Smartsheet
