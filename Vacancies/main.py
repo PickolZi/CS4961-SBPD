@@ -4,21 +4,21 @@ import pandas as pd
 import logging
 
 import smartsheet
-from smartsheet import Smartsheet
 from smartsheet.sheets import Sheets
 from smartsheet.models.sheet import Sheet
 from smartsheet.models.row import Row
 from smartsheet.models.cell import Cell
 
-from box_sdk_gen import BoxClient, BoxDeveloperTokenAuth
+from box_sdk_gen import BoxClient
 from box_sdk_gen.schemas import Items
-from box_sdk_gen.box.errors import BoxAPIError, BoxSDKError
+from box_sdk_gen.box.errors import BoxAPIError
 from box_sdk_gen.managers.files import UpdateFileByIdParent
 
 from io import BytesIO
 
 sys.path.append("../layers/shared-config/python/")  # Necessary for DEV staging. AWS auto imports this file
 from shared_config.secrets import get_secret
+from api import get_smartsheet_client, get_box_client
 
 from constants import *
 
@@ -41,19 +41,10 @@ def validate_environment_variables():
     logger.info("Validating integrity of environment variables...")
     has_error = False
 
-    SMARTSHEET_ACCESS_TOKEN = get_secret("SMARTSHEET_ACCESS_TOKEN")
-    BOX_ACCESS_TOKEN = get_secret("BOX_ACCESS_TOKEN")
-
-    if not SMARTSHEET_ACCESS_TOKEN:
-        has_error = True
-        logger.error("❌ SMARTSHEET_ACCESS_TOKEN is missing/blank.")
     if not SMARTSHEET_VACANCIES_TABLE_ID:
         has_error = True
         logger.error("❌ SMARTSHEET_VACANCIES_TABLE_ID is missing/blank.")
 
-    if not BOX_ACCESS_TOKEN:
-        has_error = True
-        logger.error("❌ BOX_ACCESS_TOKEN is missing/blank.")
     if not BOX_DEN_UPLOAD_FOLDER_ID:
         has_error = True
         logger.error("❌ BOX_DEN_UPLOAD_FOLDER_ID is missing/blank.")
@@ -61,23 +52,10 @@ def validate_environment_variables():
         has_error = True
         logger.error("❌ BOX_USED_DEN_FILES_FOLDER_ID is missing/blank.")
 
-    # Smartsheet Sheet SDK Client
-    global sheets_client
-    sheets_client = Sheets(Smartsheet(SMARTSHEET_ACCESS_TOKEN))
-    res = sheets_client.list_sheets()  # Validating that our smartsheet credentials are valid.
-    if type(res) == smartsheet.models.Error:
-        has_error = True
-        err_msg = res.result.message
-        logger.error(f"❌ Failed to authenticate Smartsheet client. {err_msg}")
-
-    # Box SDK Client
-    global box_client
-    box_client = BoxClient(BoxDeveloperTokenAuth(BOX_ACCESS_TOKEN))
-    try:
-        box_client.folders.get_folder_by_id('0')  # Runs to ensure credentials are valid.
-    except BoxSDKError as e:
-        has_error = True
-        logger.error(f"❌ Please refresh Box.com API Developer Token.")
+    # Get Smartsheet and Box.com clients
+    global sheets_client, box_client
+    sheets_client = get_smartsheet_client()
+    box_client = get_box_client()
 
     if has_error:
         raise RuntimeError("❌ Failed to load one or more environment variable(s). Exiting script.")
