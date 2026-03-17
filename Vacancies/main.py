@@ -20,7 +20,8 @@ sys.path.append("../layers/shared-config/python/")  # Necessary for DEV staging.
 from shared_config.secrets import get_secret
 from api import get_smartsheet_client, get_box_client
 
-from ..constants_master import Vacancies
+sys.path.append("..")  # Necessary to import package from parent.
+from constants_master import Vacancies
 
 logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
 logger = logging.getLogger("vacancies")
@@ -41,19 +42,10 @@ def validate_environment_variables():
     logger.info("Validating integrity of environment variables...")
     has_error = False
 
-    SMARTSHEET_ACCESS_TOKEN = get_secret("SMARTSHEET_ACCESS_TOKEN")
-    BOX_ACCESS_TOKEN = get_secret("BOX_ACCESS_TOKEN")
-
-    if not SMARTSHEET_ACCESS_TOKEN:
-        has_error = True
-        logger.error("❌ SMARTSHEET_ACCESS_TOKEN is missing/blank.")
     if not Vacancies.Smartsheet.VACANCIES_TABLE_ID.value:
         has_error = True
         logger.error("❌ SMARTSHEET_VACANCIES_TABLE_ID is missing/blank.")
 
-    if not BOX_ACCESS_TOKEN:
-        has_error = True
-        logger.error("❌ BOX_ACCESS_TOKEN is missing/blank.")
     if not Vacancies.Box.DEN_UPLOAD_FOLDER_ID.value:
         has_error = True
         logger.error("❌ BOX_DEN_UPLOAD_FOLDER_ID is missing/blank.")
