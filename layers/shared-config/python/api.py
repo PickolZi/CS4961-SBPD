@@ -58,7 +58,7 @@ def get_box_client() -> BoxClient:
     BOX_CLIENT_ID = get_secret('BOX_CLIENT_ID')
     BOX_CLIENT_SECRET = get_secret('BOX_CLIENT_SECRET')
     BOX_JWT_KEY_ID = get_secret('BOX_JWT_KEY_ID')
-    BOX_PRIVATE_KEY = get_secret('BOX_PRIVATE_KEY').replace("\\n", "\n")  # Needs special formatting to work.
+    BOX_PRIVATE_KEY = get_secret('BOX_PRIVATE_KEY',"").replace("\\n", "\n")  # Needs special formatting to work.
     BOX_PRIVATE_KEY_PASSPHRASE = get_secret('BOX_PRIVATE_KEY_PASSPHRASE')
     BOX_ENTERPRISE_ID = get_secret('BOX_ENTERPRISE_ID')
 

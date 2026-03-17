@@ -7,18 +7,21 @@ import os
 import json
 import logging
 import boto3
+from dotenv import load_dotenv
 
 from json.decoder import JSONDecodeError
 from botocore.exceptions import ClientError
 
 from .constants import AWS_SECRETS_MANAGER_SECRET_NAME
 
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-def get_secret(secret_name:str) -> str:
+
+def get_secret(secret_name:str, default_value=None) -> str:
     if os.getenv("SBPD_STAGE") == "DEV":
-        return os.getenv(secret_name)
+        return os.getenv(secret_name, default_value)
 
     client = boto3.client(service_name="secretsmanager")
 
@@ -30,4 +33,4 @@ def get_secret(secret_name:str) -> str:
     except JSONDecodeError as e:
         logger.exception(f"❌ Failed to decode json response: {response} for secret: {secret_name}")
     
-    return None
+    return default_value
