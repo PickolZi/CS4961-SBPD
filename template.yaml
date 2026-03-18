@@ -8,9 +8,6 @@ Globals:
         Timeout: 60
         Environment:
             Variables:
-                SMARTSHEET_ACCESS_TOKEN: !Ref MySecret
-                BOX_ACCESS_TOKEN: !Ref MySecret
-                GMAIL_APP_PASSWORD: !Ref MySecret
                 SBPD_STAGE: PROD
 
 Resources:
