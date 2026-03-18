@@ -24,19 +24,8 @@ _BOX_SYNC_FOLDER_PATH = _box_sync_folder()
 _BOX_SYNC_ATTACHMENTS_FOLDER_PATH = _BOX_SYNC_FOLDER_PATH / Path("attachments")
 _BOX_SYNC_EMAIL_TEMPLATE_FOLDER_PATH = _BOX_SYNC_FOLDER_PATH / Path("email_template")
 
-
-# Constants start here
-
-
-
 # Seperations project constants
 class Separations:
-
-    class Settings(Enum):
-        STAGE_DEV = "DEV"
-        STAGE_PROD = "PROD"
-        STAGE = os.getenv("SBPD_STAGE", "DEV")
-
     class Email(Enum):
         SMTP_SERVER = "smtp.gmail.com"
         PORT = 587
@@ -79,18 +68,12 @@ class Separations:
         
 
 
-# Vacancies project constants 
+# Vacancies project constants
 class Vacancies:
+    class Smartsheet(Enum):
+        VACANCIES_TABLE_ID = 4963448636002180
 
-        class Settings(Enum):
-            STAGE_DEV = "DEV"
-            STAGE_PROD = "PROD"
-            STAGE = os.getenv("SBPD_STAGE", "DEV")
-
-        class Smartsheet(Enum):
-            VACANCIES_TABLE_ID = 4963448636002180
-
-        class Box(Enum):
-            DEN_UPLOAD_FOLDER_ID = 371269295075
-            USED_DEN_FILES_FOLDER_ID = 371269938709
-            INVALID_DEN_FILES_FOLDER_ID = 371271301403
+    class Box(Enum):
+        DEN_UPLOAD_FOLDER_ID = 371269295075
+        USED_DEN_FILES_FOLDER_ID = 371269938709
+        INVALID_DEN_FILES_FOLDER_ID = 371271301403

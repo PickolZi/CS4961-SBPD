@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from json.decoder import JSONDecodeError
 from botocore.exceptions import ClientError
 
-from .constants import AWS_SECRETS_MANAGER_SECRET_NAME
+from .constants import Settings, AWS_SECRETS_MANAGER_SECRET_NAME
 
 load_dotenv()
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_secret(secret_name:str, default_value=None) -> str:
-    if os.getenv("SBPD_STAGE") == "DEV":
+    if Settings.STAGE == Settings.Stage.DEV:
         return os.getenv(secret_name, default_value)
 
     client = boto3.client(service_name="secretsmanager")

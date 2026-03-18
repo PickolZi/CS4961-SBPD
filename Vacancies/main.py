@@ -17,7 +17,7 @@ from box_sdk_gen.managers.files import UpdateFileByIdParent
 from io import BytesIO
 
 sys.path.append("../layers/shared-config/python/")  # Necessary for DEV staging. AWS auto imports this file
-from shared_config.secrets import get_secret
+from shared_config.constants import Settings
 from api import get_smartsheet_client, get_box_client
 
 sys.path.append("..")  # Necessary to import package from parent.
@@ -27,7 +27,7 @@ logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet
 logger = logging.getLogger("vacancies")
 logger.setLevel(logging.INFO)
 
-if Vacancies.Settings.STAGE.value == Vacancies.Settings.STAGE_DEV.value:
+if Settings.STAGE == Settings.Stage.DEV:
     logger_stream_handler = logging.StreamHandler()
     logger_stream_handler.setFormatter(logging.Formatter("%(asctime)s:[%(levelname)s]:%(message)s"))
     logger.addHandler(logger_stream_handler)
