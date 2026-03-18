@@ -7,9 +7,8 @@ from box_sdk_gen.managers.webhooks import CreateWebhookTarget, CreateWebhookTarg
 from InquirerPy import inquirer
 from InquirerPy.base.control import Choice
 
-from variables import *
-
 from layers.shared.python.api import get_smartsheet_webhooks_client, get_box_client
+from layers.shared.python.shared_config.config import Config
 
 
 smartsheet_webhook_client = None
@@ -37,12 +36,12 @@ class Webhook:
 # (k,v) => (Smartsheet Table ID,
 # Smartsheet Table Name)
 smartsheet_table_map = {
-    SMARTSHEET_EPR_TRACKER_TABLE_ID: "EPR Tracker",
-    SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID: "Separations Tracker"
+    Config.WebhookCli.Smartsheet.EPR_TRACKER_TABLE_ID: "EPR Tracker",
+    Config.WebhookCli.Smartsheet.SEPARATIONS_TRACKER_TABLE_ID: "Separations Tracker"
 }
 
 box_table_map = {
-    BOX_DEN_UPLOAD_FOLDER_ID: "Vacancies & Recruitment Tracker"
+    Config.WebhookCli.Box.VACANCIES_DEN_UPLOAD_FOLDER_ID: "Vacancies & Recruitment Tracker"
 }
 
 def validate_environment_variables():
@@ -112,12 +111,12 @@ def _list_webhooks() -> list[Webhook]:
     # Add API Gateway addresses
     for webhook in webhooks:
         # aws_api_gateway_address
-        if webhook.smartsheet_table_id == SMARTSHEET_EPR_TRACKER_TABLE_ID:
-            webhook.aws_api_gateway_address = EPR_TRACKER_API_GATEWAY_ADDRESS
-        elif webhook.smartsheet_table_id == SMARTSHEET_SEPARATIONS_TRACKER_TABLE_ID:
-            webhook.aws_api_gateway_address = SEPARATIONS_API_GATEWAY_ADDRESS
-        if webhook.box_folder_id == BOX_DEN_UPLOAD_FOLDER_ID:
-            webhook.aws_api_gateway_address = VACANCIES_API_GATEWAY_ADDRESS
+        if webhook.smartsheet_table_id == Config.WebhookCli.Smartsheet.EPR_TRACKER_TABLE_ID:
+            webhook.aws_api_gateway_address = Config.WebhookCli.Aws.EPR_TRACKER_API_GATEWAY_ADDRESS
+        elif webhook.smartsheet_table_id == Config.WebhookCli.Smartsheet.SEPARATIONS_TRACKER_TABLE_ID:
+            webhook.aws_api_gateway_address = Config.WebhookCli.Aws.SEPARATIONS_API_GATEWAY_ADDRESS
+        if webhook.box_folder_id == Config.WebhookCli.Box.VACANCIES_DEN_UPLOAD_FOLDER_ID:
+            webhook.aws_api_gateway_address = Config.WebhookCli.Aws.VACANCIES_API_GATEWAY_ADDRESS
 
     return webhooks
 
@@ -191,7 +190,7 @@ def create_webhook():
         try:
             box_client.webhooks.create_webhook(
                 CreateWebhookTarget(id=str(webhook_to_create.box_folder_id), type=CreateWebhookTargetTypeField.FOLDER),
-                VACANCIES_API_GATEWAY_ADDRESS,
+                Config.WebhookCli.Aws.VACANCIES_API_GATEWAY_ADDRESS,
                 [CreateWebhookTriggers.FILE_UPLOADED]
             )
         except BoxAPIError as e:
