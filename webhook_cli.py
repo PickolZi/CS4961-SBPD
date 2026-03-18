@@ -1,15 +1,15 @@
 import smartsheet
-from smartsheet import Smartsheet
-from smartsheet.webhooks import Webhooks
 from smartsheet.models import IndexResult
 
-from box_sdk_gen import BoxClient, BoxDeveloperTokenAuth, BoxAPIError, BoxSDKError
+from box_sdk_gen import BoxAPIError
 from box_sdk_gen.managers.webhooks import CreateWebhookTarget, CreateWebhookTargetTypeField, CreateWebhookTriggers
 
 from InquirerPy import inquirer
 from InquirerPy.base.control import Choice
 
 from variables import *
+
+from layers.shared.python.api import get_smartsheet_webhooks_client, get_box_client
 
 
 smartsheet_webhook_client = None
@@ -46,35 +46,10 @@ box_table_map = {
 }
 
 def validate_environment_variables():
-    has_error = False
-
-    if not SMARTSHEET_ACCESS_TOKEN:
-        has_error = True
-        print("❌ SMARTSHEET_ACCESS_TOKEN is missing/blank.")
-    if not BOX_ACCESS_TOKEN:
-        has_error = True
-        print("❌ BOX_ACCESS_TOKEN is missing/blank.")
-
-    # Smartsheet Sheet SDK Client
-    global smartsheet_webhook_client
-    smartsheet_webhook_client = Webhooks(Smartsheet(SMARTSHEET_ACCESS_TOKEN))
-    res = smartsheet_webhook_client.list_webhooks()  # Validating that our credentials are valid.
-    if type(res) == smartsheet.models.Error:
-        has_error = True
-        err_msg = res.result.message
-        print(f"❌ Failed to authenticate Smartsheet client. {err_msg}")
-
-    # Box SDK Client
-    global box_client
-    box_client = BoxClient(BoxDeveloperTokenAuth(BOX_ACCESS_TOKEN))
-    try:
-        box_client.folders.get_folder_by_id('0')  # Runs to ensure credentials are valid.
-    except BoxSDKError as e:
-        has_error = True
-        print(f"❌ Please refresh Box.com API Developer Token.")
-
-    if has_error:
-        raise RuntimeError("❌ Failed to load one or more environment variable(s). Exiting script.")
+    # Get Smartsheet Sheet and Box.com SDK Client
+    global smartsheet_webhook_client, box_client
+    smartsheet_webhook_client = get_smartsheet_webhooks_client()
+    box_client = get_box_client()
 
 def _list_webhooks() -> list[Webhook]:
     webhooks:list[Webhook] = []
@@ -267,8 +242,8 @@ def delete_webhook():
 def main():
     try:
         validate_environment_variables()
-    except Exception:
-        print("")
+    except Exception as e:
+        print(f"❌ Failed to load one or more environment variable(s). Exiting script. {e}")
         return
 
     while True:

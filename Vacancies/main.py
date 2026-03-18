@@ -16,11 +16,10 @@ from box_sdk_gen.managers.files import UpdateFileByIdParent
 
 from io import BytesIO
 
-sys.path.append("../layers/shared-config/python/")  # Necessary for DEV staging. AWS auto imports this file
+sys.path.append("../layers/shared/python/")  # Necessary for DEV staging. AWS auto imports this file
 from shared_config.constants import Settings
 from shared_config.config import Config
 from api import get_smartsheet_client, get_box_client
-
 
 logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
 logger = logging.getLogger("vacancies")

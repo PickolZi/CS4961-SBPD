@@ -1,8 +1,5 @@
 import os
 
-# API access tokens
-SMARTSHEET_ACCESS_TOKEN = os.getenv("SMARTSHEET_ACCESS_TOKEN")
-BOX_ACCESS_TOKEN = os.getenv("BOX_ACCESS_TOKEN")
 
 # Smartsheet settings
 SMARTSHEET_EPR_TRACKER_TABLE_ID = 2190844477001604  # Used for EPR Tracker webhook

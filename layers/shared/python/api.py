@@ -9,11 +9,16 @@ import logging
 import smartsheet
 from smartsheet import Smartsheet
 from smartsheet.sheets import Sheets
+from smartsheet.webhooks import Webhooks
 
 from box_sdk_gen import BoxJWTAuth, JWTConfig, BoxClient, BoxDeveloperTokenAuth
 from box_sdk_gen.box.errors import BoxSDKError
 
-from shared_config.secrets import get_secret
+# Breaks when script calls this file vs when cli calls this file.
+try:
+    from .shared_config.secrets import get_secret
+except:
+    from shared_config.secrets import get_secret
 
 logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
 logger = logging.getLogger(__name__)
@@ -44,6 +49,31 @@ def get_smartsheet_client() -> Sheets:
         raise RuntimeError(err_msg)
 
     return sheets_client
+
+def get_smartsheet_webhooks_client() -> Webhooks:
+    """
+    Reads from environment variables(DEV) or AWS Secrets Manager(PROD) and validates them to get a Smartsheet Webhooks's object.
+
+    Raises:
+        RuntimeError: If SMARTSHEET_ACCESS_TOKEN is missing/blank or failed to retrieve Sheets object from Smartsheet SDK.
+
+    Returns:
+        Webhooks: Smartsheet Webhooks's object for handling webhook operations.
+    """
+    SMARTSHEET_ACCESS_TOKEN = get_secret("SMARTSHEET_ACCESS_TOKEN")
+
+    if not SMARTSHEET_ACCESS_TOKEN:
+        logger.error("❌ SMARTSHEET_ACCESS_TOKEN is missing/blank.")
+        raise RuntimeError("SMARTSHEET_ACCESS_TOKEN is missing/blank")
+    
+    webhooks_client = Webhooks(Smartsheet(SMARTSHEET_ACCESS_TOKEN))
+    res = webhooks_client.list_webhooks()  # Validating that our smartsheet credentials are valid.
+    if type(res) == smartsheet.models.Error:
+        err_msg = res.result.message
+        logger.error(f"❌ Failed to authenticate Smartsheet Webhook client. {err_msg}")
+        raise RuntimeError(err_msg)
+
+    return webhooks_client
 
 def get_box_client() -> BoxClient:
     """

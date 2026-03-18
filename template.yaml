@@ -62,7 +62,7 @@ Resources:
     ConfigurationDependenciesLayer:
         Type: AWS::Serverless::LayerVersion
         Properties:
-            ContentUri: layers/shared-config/python.zip
+            ContentUri: layers/shared/python.zip
             CompatibleRuntimes:
                 - python3.11
     MySecret:
