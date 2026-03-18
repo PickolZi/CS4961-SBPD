@@ -51,6 +51,14 @@ class Config:
             DEN_UPLOAD_FOLDER_ID = 371269295075
             USED_DEN_FILES_FOLDER_ID = 371269938709
             INVALID_DEN_FILES_FOLDER_ID = 371271301403
+
+    
+    #####################
+    # Personnel Matters Project
+    #####################
+    class PersonnelMatters:
+        class Smartsheet:
+            PERSONNEL_MATTERS_TABLE_ID = 1234840859922308
     
 
     #####################
