@@ -65,15 +65,3 @@ class Separations:
 
     class BusinessLogic(Enum):
         PAYROLL_START_DATE_EPOCH = date(2025, 1, 6)  # Will be used to calculate every future period
-        
-
-
-# Vacancies project constants
-class Vacancies:
-    class Smartsheet(Enum):
-        VACANCIES_TABLE_ID = 4963448636002180
-
-    class Box(Enum):
-        DEN_UPLOAD_FOLDER_ID = 371269295075
-        USED_DEN_FILES_FOLDER_ID = 371269938709
-        INVALID_DEN_FILES_FOLDER_ID = 371271301403
