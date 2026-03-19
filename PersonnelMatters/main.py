@@ -9,12 +9,13 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 sys.path.append(str(BASE_DIR / "layers" / "shared" / "python"))
 
 from api import get_smartsheet_client
+from shared_config.constants import Settings
 from shared_config.config import Config
 
 logger = logging.getLogger("personnel_matters")
 logger.setLevel(logging.INFO)
 
-if not logger.handlers:
+if Settings.STAGE == Settings.Stage.DEV and not logger.handlers:
     logger_stream_handler = logging.StreamHandler()
     logger_stream_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     logger.addHandler(logger_stream_handler)
