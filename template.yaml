@@ -11,6 +11,26 @@ Globals:
                 SBPD_STAGE: PROD
 
 Resources:
+    PersonnelMattersFunction:
+        Type: AWS::Serverless::Function
+        Properties:
+            CodeUri: PersonnelMatters/
+            Handler: lambda_handler.lambda_handler
+            Runtime: python3.11
+            Architectures:
+                - x86_64
+            Policies:
+                - AWSSecretsManagerGetSecretValuePolicy:
+                      SecretArn: !Ref MySecret
+            Events:
+                HelloWorld:
+                    Type: Api
+                    Properties:
+                        Path: /personnel-matters
+                        Method: post
+            Layers:
+                - !Ref CommonDependenciesLayer
+                - !Ref ConfigurationDependenciesLayer
     SeparationsFunction:
         Type: AWS::Serverless::Function
         Properties:
