@@ -224,6 +224,7 @@ def send_customized_emails_and_attachments(contacts: list[SmartsheetContact]) ->
 
     if not email_template:
         raise Exception("HTML Email template could not be found.")
+    #TODO: Add validation logic to ensure emails environment variables exist
     Config.Separations.Email.SMTP_SERVER
     email_manager = EmailManager(Config.Separations.Email.SMTP_SERVER, Config.Separations.Email.PORT, Config.Separations.Email.SENDER_ADDRESS, Config.Separations.Email.SENDER_APP_PASSWORD)
 
