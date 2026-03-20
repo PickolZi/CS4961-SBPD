@@ -1,3 +1,5 @@
+from enum import Enum
+
 import smartsheet
 from smartsheet.models import IndexResult
 
@@ -10,39 +12,36 @@ from InquirerPy.base.control import Choice
 from layers.shared.python.api import get_smartsheet_webhooks_client, get_box_client
 from layers.shared.python.shared_config.config import Config
 
+class WebhookType(Enum):
+    BOX = "BOX"
+    SMARTSHEET = "SMARTSHEET"
 
-smartsheet_webhook_client = None
-box_client = None
+class WebhookStatus(Enum):
+    CREATED = "CREATED"
+    INVALID = "INVALID"
+    NOT_CREATED = "NOT CREATED"
 
 class Webhook:
     def __init__(
             self,
-            id: str,
+            id: str | None,
             name: str,
-            type: str,
-            status:str,
-            smartsheet_table_id=None,
-            box_folder_id=None,
-            aws_api_gateway_address=None):
+            type: WebhookType,
+            status: WebhookStatus,
+            aws_api_gateway_address: str,
+            box_folder_id: str = None,
+            smartsheet_table_id: str = None):
         self.id = id
         self.name = name
         self.type = type
         self.status = status
-        self.smartsheet_table_id = smartsheet_table_id
-        self.box_folder_id = box_folder_id
         self.aws_api_gateway_address = aws_api_gateway_address
+        self.box_folder_id = box_folder_id
+        self.smartsheet_table_id = smartsheet_table_id
 
-
-# (k,v) => (Smartsheet Table ID,
-# Smartsheet Table Name)
-smartsheet_table_map = {
-    Config.WebhookCli.Smartsheet.EPR_TRACKER_TABLE_ID: "EPR Tracker",
-    Config.WebhookCli.Smartsheet.SEPARATIONS_TRACKER_TABLE_ID: "Separations Tracker"
-}
-
-box_table_map = {
-    Config.WebhookCli.Box.VACANCIES_DEN_UPLOAD_FOLDER_ID: "Vacancies & Recruitment Tracker"
-}
+# Global SDK Clients
+smartsheet_webhook_client = None
+box_client = None
 
 def validate_environment_variables():
     # Get Smartsheet Sheet and Box.com SDK Client
@@ -51,9 +50,46 @@ def validate_environment_variables():
     box_client = get_box_client()
 
 def _list_webhooks() -> list[Webhook]:
-    webhooks:list[Webhook] = []
+    webhooks:list[Webhook] = [
+        Webhook(
+            id = None,
+            name = "EPR Tracker",
+            type = WebhookType.SMARTSHEET,
+            status = WebhookStatus.NOT_CREATED,
+            aws_api_gateway_address = Config.WebhookCli.Aws.EPR_TRACKER_API_GATEWAY_ADDRESS,
+            box_folder_id = None,
+            smartsheet_table_id = Config.WebhookCli.Smartsheet.EPR_TRACKER_TABLE_ID
+        ),
+        Webhook(
+            id = None,
+            name = "Personnel Matters",
+            type = WebhookType.SMARTSHEET,
+            status = WebhookStatus.NOT_CREATED,
+            aws_api_gateway_address = Config.WebhookCli.Aws.PERSONNEL_MATTERS_API_GATEWAY_ADDRESS,
+            box_folder_id = None,
+            smartsheet_table_id = Config.WebhookCli.Smartsheet.PERSONNEL_MATTERS_TABLE_ID
+        ),
+        Webhook(
+            id = None,
+            name = "Separations Tracker",
+            type = WebhookType.SMARTSHEET,
+            status = WebhookStatus.NOT_CREATED,
+            aws_api_gateway_address = Config.WebhookCli.Aws.SEPARATIONS_API_GATEWAY_ADDRESS,
+            box_folder_id = None,
+            smartsheet_table_id = Config.WebhookCli.Smartsheet.SEPARATIONS_TRACKER_TABLE_ID
+        ),
+        Webhook(
+            id = None,
+            name = "Vacancies & Recruitment Tracker",
+            type = WebhookType.BOX,
+            status = WebhookStatus.NOT_CREATED,
+            aws_api_gateway_address = Config.WebhookCli.Aws.VACANCIES_API_GATEWAY_ADDRESS,
+            box_folder_id = Config.WebhookCli.Box.VACANCIES_DEN_UPLOAD_FOLDER_ID,
+            smartsheet_table_id = None
+        )
+    ]
 
-    # Get EPR Tracker and Separations Webhook status from Smartsheet
+    # Get EPR Tracker, Personnel Matters, and Separations Webhook ID and status from Smartsheet
     try:
         res:IndexResult = smartsheet_webhook_client.list_webhooks()
         if type(res) == smartsheet.models.Error:
@@ -64,59 +100,53 @@ def _list_webhooks() -> list[Webhook]:
             smartsheet_webhook_id = res_webhook.get("id")
             smartsheet_table_id = res_webhook.get("scopeObjectId")
             smartsheet_status = res_webhook.get("status")
+            lambda_callbackurl = res_webhook.get("callbackUrl")
 
-            if not smartsheet_table_id or not smartsheet_status:
+            if not smartsheet_webhook_id or not smartsheet_table_id or not smartsheet_status:
                 continue
-            if smartsheet_table_id in smartsheet_table_map:
-                name = smartsheet_table_map[smartsheet_table_id]
-                status = "Invalid"
-                if smartsheet_status == "ENABLED":
-                    status = "Created"
 
-                webhooks.append(Webhook(smartsheet_webhook_id, name, "Smartsheet", status, smartsheet_table_id=smartsheet_table_id))
+            # Set webhook id and status for Smartsheet
+            target_webhook = next(filter(lambda x:x.smartsheet_table_id == smartsheet_table_id, webhooks), None)
+            if target_webhook and isinstance(target_webhook, Webhook):
+                target_webhook_status = WebhookStatus.CREATED if smartsheet_status == "ENABLED" else WebhookStatus.INVALID
+
+                if lambda_callbackurl != target_webhook.aws_api_gateway_address:
+                    # Add new webhook to cli because a different aws account created a webhook on the same smartsheet table
+                    webhooks.append(
+                        Webhook(
+                            id = smartsheet_webhook_id,
+                            name = target_webhook.name,
+                            type = target_webhook.type,
+                            status = target_webhook_status,
+                            aws_api_gateway_address = lambda_callbackurl,
+                            box_folder_id = None,
+                            smartsheet_table_id = target_webhook.smartsheet_table_id
+                        )
+                    )
+                    continue
+
+                target_webhook.id = smartsheet_webhook_id
+                target_webhook.aws_api_gateway_address = lambda_callbackurl
+                target_webhook.status = target_webhook_status
     except Exception as e:
         print(f"❌ Failed to list Smartsheet webhooks. {e}")
         raise e
-    
-    # Add Smartsheet 'Not Created' webhooks
-    webhook_project_names = set([webhook.name for webhook in webhooks])
-    for smartsheet_id, smartsheet_name in smartsheet_table_map.items():
-        if smartsheet_name not in webhook_project_names:
-            webhooks.append(
-                Webhook("N/A", smartsheet_name, "Smartsheet", "Not Created", smartsheet_table_id=smartsheet_id))
 
-    # Get Vacancies Webhook status from Box.com
+    # Get Vacancies Webhook ID and status from Box.com
     try:
         res = box_client.webhooks.get_webhooks()
 
         data = res.entries if hasattr(res, "entries") else []
         for res_webhook in data:
-            res_target_id = int(res_webhook.target.id)
-            if res_target_id in box_table_map:
-                box_webhook_id = res_webhook.id
-                name = box_table_map[res_target_id]
-                webhooks.append(
-                    Webhook(box_webhook_id, name, "Box.com", "Created", box_folder_id=res_target_id))
+            box_folder_id = int(res_webhook.target.id)
+
+            target_webhook = next(filter(lambda x:x.box_folder_id and int(x.box_folder_id) == box_folder_id, webhooks), None)
+            if target_webhook and isinstance(target_webhook, Webhook):
+                target_webhook.id = res_webhook.id
+                target_webhook.status = WebhookStatus.CREATED
     except Exception as e:
         print(f"❌ Failed to list Box.com webhooks. {e}")
         raise e
-    
-    # Add Box.com 'Not Created' webhooks
-    webhook_project_names.update([webhook.name for webhook in webhooks])  # Adds Box to existing project names
-    for box_folder_id, box_project_name in box_table_map.items():
-        if box_project_name not in webhook_project_names:
-            webhooks.append(
-                Webhook("N/A", box_project_name, "Box.com", "Not Created", box_folder_id=box_folder_id))
-
-    # Add API Gateway addresses
-    for webhook in webhooks:
-        # aws_api_gateway_address
-        if webhook.smartsheet_table_id == Config.WebhookCli.Smartsheet.EPR_TRACKER_TABLE_ID:
-            webhook.aws_api_gateway_address = Config.WebhookCli.Aws.EPR_TRACKER_API_GATEWAY_ADDRESS
-        elif webhook.smartsheet_table_id == Config.WebhookCli.Smartsheet.SEPARATIONS_TRACKER_TABLE_ID:
-            webhook.aws_api_gateway_address = Config.WebhookCli.Aws.SEPARATIONS_API_GATEWAY_ADDRESS
-        if webhook.box_folder_id == Config.WebhookCli.Box.VACANCIES_DEN_UPLOAD_FOLDER_ID:
-            webhook.aws_api_gateway_address = Config.WebhookCli.Aws.VACANCIES_API_GATEWAY_ADDRESS
 
     return webhooks
 
@@ -125,7 +155,7 @@ def list_webhooks():
     
     headers = ["Webhook ID", "Webhook Type", "Project Name", "Status", "API Gateway Address"]
     rows = [
-        (webhook.id, webhook.type, webhook.name, webhook.status, webhook.aws_api_gateway_address) for webhook in webhooks
+        (webhook.id, webhook.type.value, webhook.name, webhook.status.value, webhook.aws_api_gateway_address) for webhook in webhooks
     ]
     all_rows = [headers] + rows
     col_widths = [max(len(str(row[i])) for row in all_rows) for i in range(len(headers))]
@@ -149,7 +179,7 @@ def create_webhook():
     webhooks = _list_webhooks()
 
     choices = [
-        Choice(value=webhook.name, name=f"{webhook.type}) {webhook.name}") for webhook in webhooks if webhook.id == "N/A"
+        Choice(value=webhook.name, name=f"{webhook.type.value}) {webhook.name}") for webhook in webhooks if webhook.status == WebhookStatus.NOT_CREATED
     ]
     choices.extend([Choice("Exit")])
 
@@ -164,7 +194,7 @@ def create_webhook():
 
     print(f"Creating webhook for project: '{webhook_name}'...")
     webhook_to_create:Webhook = list(filter(lambda x:x.name == webhook_name, webhooks))[0]
-    if webhook_to_create.type == "Smartsheet":
+    if webhook_to_create.type == WebhookType.SMARTSHEET:
         webhook_create_object = smartsheet.models.Webhook({
             'version': 1,
             'name': f'SBPD - CSULA {webhook_to_create.name} Webhook',
@@ -186,7 +216,7 @@ def create_webhook():
             return
 
         print(f"✅ Successfully created Smartsheet webhook: '{webhook_to_create.name}\n")
-    elif webhook_to_create.type == "Box.com":
+    elif webhook_to_create.type == WebhookType.BOX:
         try:
             box_client.webhooks.create_webhook(
                 CreateWebhookTarget(id=str(webhook_to_create.box_folder_id), type=CreateWebhookTargetTypeField.FOLDER),
@@ -205,7 +235,7 @@ def delete_webhook():
     webhooks = _list_webhooks()
 
     choices = [
-        Choice(value=webhook.id, name=f"{webhook.type}) {webhook.name}") for webhook in webhooks if webhook.id != "N/A"
+        Choice(value=webhook.id, name=f"{webhook.type}) {webhook.name}") for webhook in webhooks if webhook.status != WebhookStatus.NOT_CREATED
     ]
     choices.extend([Choice("Exit")])
 
@@ -220,13 +250,13 @@ def delete_webhook():
 
     print(f"Deleting webhook with id: '{webhook_id}'...")
     webhook_to_delete:Webhook = list(filter(lambda x:x.id == webhook_id, webhooks))[0]
-    if webhook_to_delete.type == "Smartsheet":
+    if webhook_to_delete.type == WebhookType.SMARTSHEET:
         res = smartsheet_webhook_client.delete_webhook(webhook_to_delete.id)
         if type(res) == smartsheet.models.Error:
             print(f"❌ Failed to delete Smartsheet webhook with id: '{webhook_to_delete.id}'\n")
             return
         print(f"✅ Successfully deleted Smartsheet webhook with id: '{webhook_to_delete.id}\n")
-    elif webhook_to_delete.type == "Box.com":
+    elif webhook_to_delete.type == WebhookType.BOX:
         try:
             box_client.webhooks.delete_webhook_by_id(webhook_to_delete.id)
         except BoxAPIError as e:
