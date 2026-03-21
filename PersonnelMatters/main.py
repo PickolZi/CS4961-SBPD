@@ -8,7 +8,7 @@ from smartsheet.models import Sheet
 BASE_DIR = Path(__file__).resolve().parents[1]
 sys.path.append(str(BASE_DIR / "layers" / "shared" / "python"))
 
-from api import get_smartsheet_client
+from api import get_smartsheet_sheets_client
 from shared_config.constants import Settings
 from shared_config.config import Config
 
@@ -38,7 +38,7 @@ def retrieve_personnel_matters_rows(sheet_client: Sheets):
 def main():
     try:
         logger.info("Personnel Matters main() started")
-        sheet_client = get_smartsheet_client()
+        sheet_client = get_smartsheet_sheets_client()
         rows = retrieve_personnel_matters_rows(sheet_client)
         logger.info(f"Retrieved {len(rows)} rows total")
         logger.info("Personnel Matters main() completed successfully.")

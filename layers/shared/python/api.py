@@ -25,7 +25,32 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-def get_smartsheet_client() -> Sheets:
+def get_smartsheet_client() -> Smartsheet:
+    """
+    Reads from environment variables(DEV) or AWS Secrets Manager(PROD) and validates them to get a Smartsheet object.
+
+    Raises:
+        RuntimeError: If SMARTSHEET_ACCESS_TOKEN is missing/blank or failed to retrieve Smartsheet object from Smartsheet SDK.
+
+    Returns:
+        Smartsheet: Smartsheet's object for handling Smartsheet operations.
+    """
+    SMARTSHEET_ACCESS_TOKEN = get_secret("SMARTSHEET_ACCESS_TOKEN")
+
+    if not SMARTSHEET_ACCESS_TOKEN:
+        logger.error("❌ SMARTSHEET_ACCESS_TOKEN is missing/blank.")
+        raise RuntimeError("SMARTSHEET_ACCESS_TOKEN is missing/blank")
+    
+    smartsheet_client = Smartsheet(SMARTSHEET_ACCESS_TOKEN)
+    res = Sheets(smartsheet_client).list_sheets()  # Validating that our smartsheet credentials are valid.
+    if type(res) == smartsheet.models.Error:
+        err_msg = res.result.message
+        logger.error(f"❌ Failed to authenticate Smartsheet client. {err_msg}")
+        raise RuntimeError(err_msg)
+
+    return smartsheet_client
+
+def get_smartsheet_sheets_client() -> Sheets:
     """
     Reads from environment variables(DEV) or AWS Secrets Manager(PROD) and validates them to get a Smartsheet Sheet's object.
 
@@ -35,20 +60,7 @@ def get_smartsheet_client() -> Sheets:
     Returns:
         Sheets: Smartsheet Sheet's object for handling sheets operations.
     """
-    SMARTSHEET_ACCESS_TOKEN = get_secret("SMARTSHEET_ACCESS_TOKEN")
-
-    if not SMARTSHEET_ACCESS_TOKEN:
-        logger.error("❌ SMARTSHEET_ACCESS_TOKEN is missing/blank.")
-        raise RuntimeError("SMARTSHEET_ACCESS_TOKEN is missing/blank")
-    
-    sheets_client = Sheets(Smartsheet(SMARTSHEET_ACCESS_TOKEN))
-    res = sheets_client.list_sheets()  # Validating that our smartsheet credentials are valid.
-    if type(res) == smartsheet.models.Error:
-        err_msg = res.result.message
-        logger.error(f"❌ Failed to authenticate Smartsheet client. {err_msg}")
-        raise RuntimeError(err_msg)
-
-    return sheets_client
+    return Sheets(get_smartsheet_client())
 
 def get_smartsheet_webhooks_client() -> Webhooks:
     """

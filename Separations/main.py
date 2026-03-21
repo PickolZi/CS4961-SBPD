@@ -19,7 +19,7 @@ from helpers.regex import replace_email_template_placeholders
 sys.path.append("../layers/shared/python/")  # Necessary for DEV staging. AWS auto imports this file
 from shared_config.constants import Settings, Constants
 from shared_config.config import Config
-from api import get_smartsheet_client, get_box_client
+from api import get_smartsheet_sheets_client, get_box_client
 
 """
 Separations Script.
@@ -289,7 +289,7 @@ def update_separation_contacts_email_status(sheet_client: Sheets, contacts: list
 def main():
     # Get Smartsheet and Box client
     try:
-        sheet_client: Sheets = get_smartsheet_client()
+        sheet_client: Sheets = get_smartsheet_sheets_client()
         box_client: BoxClient = get_box_client()
     except Exception as e:
         logger.exception(f"❌ Failed to fetch Smartsheet/Box.com SDK Client.")
