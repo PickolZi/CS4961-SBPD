@@ -1,4 +1,5 @@
 import os
+import sys
 import requests
 from io import BytesIO
 
@@ -10,6 +11,9 @@ from box_sdk_gen.managers.uploads import UploadFileAttributes, UploadFileAttribu
 from box_sdk_gen.box.errors import BoxAPIError, BoxSDKError
 from box_sdk_gen.schemas import Files
 
+sys.path.append("../layers/shared/python/")  # Necessary for DEV staging. AWS auto imports this file
+from api import get_box_client
+
 """
 Script to upload a file to a Box folder using the Box Python SDK.
 
@@ -20,12 +24,8 @@ Requirements:
 
 
 load_dotenv()
-# Note: Developer tokens expire after 60 minutes
-# TODO: Need paid plan to create an App token that DOESN'T EXPIRE
-DEVELOPER_TOKEN = os.getenv("BOX_ACCESS_TOKEN", "")
-
 FILE_PATH = "sample_epr.pdf"  # Replace with filename from Smartsheet
-FOLDER_ID = "345470036941"  # Replace with box com file id from URL
+FOLDER_ID = "372200130812"  # Replace with box com file id from URL
 
 def upload_file_to_box_by_url(s3_url, filename, folder_id=FOLDER_ID):
     """
@@ -40,8 +40,7 @@ def upload_file_to_box_by_url(s3_url, filename, folder_id=FOLDER_ID):
     """
 
     # Get Box client
-    auth: BoxDeveloperTokenAuth = BoxDeveloperTokenAuth(token=DEVELOPER_TOKEN)
-    client: BoxClient = BoxClient(auth=auth)
+    client: BoxClient = get_box_client()
     
     # Upload file to box com
     uploaded_files: Files | None = None

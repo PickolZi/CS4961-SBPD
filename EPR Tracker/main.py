@@ -1,4 +1,5 @@
 import os, sys
+import logging
 from enum import Enum
 from datetime import date, datetime
 from collections import defaultdict
@@ -12,6 +13,10 @@ from smartsheet.models import Sheet
 
 import box as box_helper
 
+sys.path.append("../layers/shared/python/")  # Necessary for DEV staging. AWS auto imports this file
+from shared_config.constants import Settings
+# from shared_config.config import Config
+# from api import get_smartsheet_client, get_box_client
 
 """
 Script that:
@@ -24,6 +29,16 @@ Requirements:
 - Smartsheet library (install with: `pip install smartsheet-python-sdk` or `pip install -r requirements.txt`)
 - Smartsheet API Key (Can be created in Apps & Integrations)
 """
+
+logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
+logger = logging.getLogger("EPR Tracker")
+logger.setLevel(logging.INFO)
+
+if Settings.STAGE == Settings.Stage.DEV:
+    logger_stream_handler = logging.StreamHandler()
+    logger_stream_handler.setFormatter(logging.Formatter("%(asctime)s:[%(levelname)s]:%(message)s"))
+    logger.addHandler(logger_stream_handler)
+
 
 SHEET_ID = 2190844477001604
 HISTORY_SHEET_ID = 8040061653176196
@@ -132,8 +147,8 @@ def save_epr_attachments_to_box(smartsheet_client: Smartsheet, filtered_rows: li
         attachment_url = attachment.url
         
         # Parse the columns. Will need to update columns if columns are ever increased/decreased.
-        first_name = row[4]["value"].upper()
-        last_name = row[5]["value"].upper()
+        first_name = row[5]["value"].upper()
+        last_name = row[6]["value"].upper()
         today_string = date.today().strftime(DATE_FORMAT)
 
         # Uncomment to get columns
@@ -148,17 +163,17 @@ def save_epr_attachments_to_box(smartsheet_client: Smartsheet, filtered_rows: li
         counter = f"{idx+1}/{len(filtered_rows)}"
         try:
             uploaded_file = box_helper.upload_file_to_box_by_url(attachment_url, filename)
-            print(f"✅ ({counter}) File uploaded successfully!")
-            print(f"  File ID: {uploaded_file.id}")
-            print(f"  File Name: {uploaded_file.name}")
-            print(f"  File URL: https://app.box.com/file/{uploaded_file.id}")
+            logger.info(f"✅ ({counter}) File uploaded successfully!")
+            logger.info(f"  File ID: {uploaded_file.id}")
+            logger.info(f"  File Name: {uploaded_file.name}")
+            logger.info(f"  File URL: https://app.box.com/file/{uploaded_file.id}")
         except FileExistsError as err:
-            print(f"🚧 ({counter}) Error: {err}")
+            logger.warning(f"🚧 ({counter}) Error: {err}")
             error_map[row_id].append(ATTACHMENT_FILE_ALREADY_EXISTS_ERROR_MESSAGE)
         except RuntimeError as err:
             raise err
         except Exception as err:
-            print(f"🚧 ({counter}) Error uploading file: {err}")
+            logger.warning(f"🚧 ({counter}) Error uploading file: {err}")
             error_map[row_id].append(ATTACHMENT_UNKNOWN_ERROR_MESSAGE)
 
 def copy_smartsheet_rows_to_history_table(smartsheet_client: Smartsheet, filtered_rows: list, error_map: dict):
@@ -180,8 +195,8 @@ def copy_smartsheet_rows_to_history_table(smartsheet_client: Smartsheet, filtere
 
     for idx,row in enumerate(filtered_rows):
         row_id = row[0]["rowId"]
-        first_name = row[4]["value"].upper()
-        last_name = row[5]["value"].upper()
+        first_name = row[5]["value"].upper()
+        last_name = row[6]["value"].upper()
 
         # We don't want rows that previously have had errors.
         if row_id in error_map:
@@ -224,10 +239,10 @@ def copy_smartsheet_rows_to_history_table(smartsheet_client: Smartsheet, filtere
             )
 
             counter = f"{idx+1}/{len(filtered_rows)}"
-            print(f"✅ ({counter}) Row successfully copied to history table for {first_name} {last_name}")
+            logger.info(f"✅ ({counter}) Row successfully copied to history table for {first_name} {last_name}")
         except Exception as err:
             counter = f"{idx+1}/{len(filtered_rows)}"
-            print(f"🚧 ({counter}) Error saving row to history table for {first_name} {last_name}")
+            logger.exception(f"🚧 ({counter}) Error saving row to history table for {first_name} {last_name}")
             error_map[row_id].append(COPY_SMARTSHEET_ROW_ERROR_MESSAGE)
         
 def reset_columns_for_next_epr_due_date(smartsheet_client: Smartsheet, filtered_rows: list, error_map: dict):
@@ -270,21 +285,21 @@ def reset_columns_for_next_epr_due_date(smartsheet_client: Smartsheet, filtered_
 
         row_info = {
             "status": row[1],
-            "first_name": row[4],
-            "last_name": row[5],
-            "anniversary_month": row[9],
-            "probationary_epr": row[10],
-            "employment_status": row[11],
-            "probation_quarter": row[12],
-            "probation_due_date": row[13],
-            "late_epr": row[14],
-            "signed_epr_due_date": row[15],
-            "previous_epr_signed": row[16],
-            "previous_epr_actual_due_date": row[17]
+            "first_name": row[5],
+            "last_name": row[6],
+            "anniversary_month": row[11],
+            "probationary_epr": row[12],
+            "employment_status": row[13],
+            "probation_quarter": row[14],
+            "probation_due_date": row[15],
+            "late_epr": row[16],
+            "signed_epr_due_date": row[17],
+            "previous_epr_signed": row[18],
+            "previous_epr_actual_due_date": row[19]
         }
 
         try:
-            print(f"Starting to reset row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
+            logger.info(f"Starting to reset row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
             employment_status = row_info["employment_status"].get("value", "")
             probation_quarter = row_info["probation_quarter"].get("value", "")
             cur_epr_due_date = row_info["signed_epr_due_date"].get("value")
@@ -309,9 +324,9 @@ def reset_columns_for_next_epr_due_date(smartsheet_client: Smartsheet, filtered_
             elif employment_status == EmploymentStatus.FLEX_PROBATIONARY.value:
                 if probation_quarter not in FLEX_PROBATION_STATUS_QUARTER_VALUES:
                     if probation_quarter in PROBATION_STATUS_QUARTER_VALUES:
-                        print(f"🚧 Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}. Probation quarter value can not be 3Q or 4Q")
+                        logger.warning(f"🚧 Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}. Probation quarter value can not be 3Q or 4Q")
                     else:
-                        print(f"🚧 Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}. Missing probation quarter value")
+                        logger.warning(f"🚧 Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}. Missing probation quarter value")
                         
                     error_map[row_id].append(MISSING_PROBATION_QUARTER_ERROR_MESSAGE)
                     continue
@@ -340,7 +355,7 @@ def reset_columns_for_next_epr_due_date(smartsheet_client: Smartsheet, filtered_
                     }))
             elif employment_status == EmploymentStatus.PROBATIONARY.value:
                 if probation_quarter not in PROBATION_STATUS_QUARTER_VALUES:
-                    print(f"🚧 Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}. Missing probation quarter value")
+                    logger.warning(f"🚧 Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}. Missing probation quarter value")
                     error_map[row_id].append(MISSING_PROBATION_QUARTER_ERROR_MESSAGE)
                     continue
 
@@ -367,7 +382,7 @@ def reset_columns_for_next_epr_due_date(smartsheet_client: Smartsheet, filtered_
                         "value": PROBATION_STATUS_QUARTER_VALUES[probation_quarter_position+1]
                     }))
             else:
-                print(f"🚧 Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}. Missing employment status value")
+                logger.warning(f"🚧 Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}. Missing employment status value")
                 error_map[row_id].append(MISSING_EMPLOYMENT_STATUS_ERROR_MESSAGE)
                 continue
 
@@ -405,96 +420,88 @@ def reset_columns_for_next_epr_due_date(smartsheet_client: Smartsheet, filtered_
             # Delete all attachments in the row
             attachments = smartsheet_client.Attachments.list_row_attachments(SHEET_ID, row_id).data
             for attachment in attachments:
-                print(f"  attachment: {attachment.name} successfully deleted")
+                logger.info(f"  attachment: {attachment.name} successfully deleted")
                 smartsheet_client.Attachments.delete_attachment(SHEET_ID, attachment.id)
 
             smartsheet_client.Sheets.update_rows(SHEET_ID, [row_to_update])
             counter = f"{idx+1}/{len(filtered_rows)}"
-            print(f"✅ ({counter}) Successfully reset row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
-        except Exception as err:
-            print(f"🚧 ({counter}) Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
+            logger.info(f"✅ ({counter}) Successfully reset row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
+        except Exception:
+            logger.exception(f"🚧 ({counter}) Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
             error_map[row_id].append(RESETTING_SMARTSHEET_ROW_ERROR_MESSAGE)
 
 
 def main():
     # Get Smartsheet Client
     try:
-        print(f"🤖 Fetching Smartsheet Client...")
+        logger.info(f"🤖 Fetching Smartsheet Client...")
         smartsheet_client = get_smartsheet_client(access_token=SMARTSHEET_ACCESS_TOKEN)
-        print(f"Successfully found a valid Smartsheet Client...")
+        logger.info(f"✅ Successfully found a valid Smartsheet Client...")
     except RuntimeError as err:
-        print("\n❌ Failed to fetch smartsheet client...")
-        print(f"Error: {err}")
-        sys.exit(1)
+        logger.exception("\n❌ Failed to fetch smartsheet client...")
+        return
 
 
     # Get rows by status == "Saving to Box"
     try:
         filtered_rows = get_rows_awaiting_saving(smartsheet_client=smartsheet_client, sheet_id=SHEET_ID)
         if len(filtered_rows) == 0:
-            print("✅ Finished early. No rows with status 'Saving to Box'")
-            sys.exit(1)
-        print(f"Found {len(filtered_rows)} rows with the status 'Saving to Box'...\n")
-    except Exception as err:
-        print("\n❌ Failed to fetch and filter rows...")
-        print(f"Error: {err}")
-        sys.exit(1)
+            logger.info("✅ Finished early. No rows with status 'Saving to Box'")
+            return
+        logger.info(f"Found {len(filtered_rows)} rows with the status 'Saving to Box'...\n")
+    except Exception:
+        logger.exception("\n❌ Failed to fetch and filter rows...")
+        return
 
     # Send/save EPR attachment(s) to Box
     try:
-        print(f"📦 Saving {len(filtered_rows)} EPR attachment(s) to Box")
+        logger.info(f"📦 Saving {len(filtered_rows)} EPR attachment(s) to Box")
         save_epr_attachments_to_box(smartsheet_client, filtered_rows, error_map)
 
         if error_map:
-            print(f"🚧 ({len(error_map)} of {len(filtered_rows)}) EPRs had some errors. Sending errors to designated email... ")
+            logger.warning(f"🚧 ({len(error_map)} of {len(filtered_rows)}) EPRs had some errors. Sending errors to designated email... ")
             # TODO: Write script to send a message to the designated email.
         
         if len(error_map) > 0 and len(error_map) == len(filtered_rows):
             raise RuntimeError("Every single EPR has failed to save. Please contact this email... ")
 
         successful_epr_count = len(filtered_rows) - len(error_map)
-        print(f"Successfully saved {successful_epr_count} EPRs to Box...\n")
+        logger.info(f"Successfully saved {successful_epr_count} EPRs to Box...\n")
     except Exception as err:
-        # If this is ran, then a MAJOR error occurred with possible side effects - attachments saved
-        # in Box but changes not reflected in Smartsheet.
-        print("\n❌ Failed to save attachments to Box...")
-        print(f"Error: {err}")
-        print("Try refreshing Box's Developer Token")
-        sys.exit(1)
+        logger.exception("\n❌ Failed to save attachments to Box...")
+        return
 
     # Copy row to history records table in Smartsheet
     try:
-        print(f"💽 Copying {successful_epr_count} rows to the history records table...")
+        logger.info(f"💽 Copying {successful_epr_count} rows to the history records table...")
         copy_smartsheet_rows_to_history_table(smartsheet_client, filtered_rows, error_map)
 
         if len(error_map) > 0 and len(error_map) == len(filtered_rows):
             raise RuntimeError("Every single row failed to save to history map. Please contact this email... ")
         
         successful_epr_count = len(filtered_rows) - len(error_map)
-        print(f"Successfully saved {successful_epr_count} rows to the history records table...\n")
+        logger.info(f"Successfully saved {successful_epr_count} rows to the history records table...\n")
     except Exception as err:
         # Similarly, if this is ran, then a MAJOR error likely occurred.
-        print("\n❌ Failed to save rows to history table...")
-        print(f"Error: {err}")
-        sys.exit(1)
+        logger.exception("\n❌ Failed to save rows to history table...")
+        return
         
     # Reset rows to prepare for next EPR
     try:
-        print(f"🧼 Resetting {successful_epr_count} rows, preparing them for their next EPR due date...")
+        logger.info(f"🧼 Resetting {successful_epr_count} rows, preparing them for their next EPR due date...")
         reset_columns_for_next_epr_due_date(smartsheet_client, filtered_rows, error_map)
 
         if len(error_map) > 0 and len(error_map) == len(filtered_rows):
             raise RuntimeError("Every single row failed to reset for their next EPR due date. Please contact this email... ")
         
         successful_epr_count = len(filtered_rows) - len(error_map)
-        print(f"Successfully reset {successful_epr_count} rows for their next EPR due date...")
+        logger.info(f"Successfully reset {successful_epr_count} rows for their next EPR due date...")
     except Exception as err:
-        print("\n❌ Failed to reset successful rows for their next EPR due date...")
-        print(f"Error: {err}")
-        sys.exit(1)
+        logger.exception("\n❌ Failed to reset successful rows for their next EPR due date...")
+        return
 
     successful_epr_count = len(filtered_rows) - len(error_map)
-    print(f"\n✅ Smartsheet script ran successfully! ({successful_epr_count}/{len(filtered_rows)}) EPRs saved and updated for next EPR due date!")
+    logger.info(f"\n✅ Smartsheet script ran successfully! ({successful_epr_count}/{len(filtered_rows)}) EPRs saved and updated for next EPR due date!")
 
 
 if __name__ == "__main__":
