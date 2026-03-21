@@ -7,16 +7,17 @@ from dotenv import load_dotenv
 
 import smartsheet
 from smartsheet.smartsheet import Smartsheet
-from smartsheet.models.attachment import Attachment
+from smartsheet.sheets import Sheets
+from smartsheet.attachments import Attachments
 from smartsheet.models.index_result import IndexResult
-from smartsheet.models import Sheet
+from smartsheet.models import Attachment
 
 import box as box_helper
 
 sys.path.append("../layers/shared/python/")  # Necessary for DEV staging. AWS auto imports this file
 from shared_config.constants import Settings
 # from shared_config.config import Config
-# from api import get_smartsheet_client, get_box_client
+from api import get_smartsheet_client, get_box_client
 
 """
 Script that:
@@ -52,40 +53,14 @@ error_map = {
 DATE_FORMAT = "%Y-%m-%d"
 
 load_dotenv()
-# Note: Smartsheet access token expires after 10 years
-SMARTSHEET_ACCESS_TOKEN = os.getenv("SMARTSHEET_ACCESS_TOKEN", "")
 
-def get_smartsheet_client(access_token: str) -> Smartsheet:
-    """
-    Fetch Smartsheet client
-    
-    Args:
-        access_token: API token from Smartsheet
-    
-    Returns:
-        Smartsheet object or raise Smartsheet Error
-    """
-    
-    # Fetch Smartsheet client
-    smartsheet_client = smartsheet.Smartsheet(access_token=SMARTSHEET_ACCESS_TOKEN)
 
-    # Test API call to see if smartsheet token was successfully authenticated.
-    # For some reason there is no error thrown when there's an unsuccessful client connection.
-    response:IndexResult = smartsheet_client.Sheets.list_sheets()
-    
-    if type(response) == smartsheet.models.error.Error:
-        err_code = response.result.error_code  # type: ignore
-        err_message = response.result.message  # type: ignore
-        raise RuntimeError(err_message)
-
-    return smartsheet_client
-
-def get_rows_awaiting_saving(smartsheet_client: Smartsheet, sheet_id:int):
+def get_rows_awaiting_saving(sheet_client: Sheets, sheet_id:int):
     """
     Fetches rows that have the status=='Saving to Box'
     
     Args:
-        smartsheet_client: Smartsheet client object
+        sheet_client: Smartsheet's Sheet SDK object
         sheet_id: Smartsheet Employees sheet id
     
     Returns:
@@ -93,7 +68,7 @@ def get_rows_awaiting_saving(smartsheet_client: Smartsheet, sheet_id:int):
     """
     SAVING_STATUS = "Saving to Box"
 
-    sheet:Sheet = smartsheet_client.Sheets.get_sheet(sheet_id=sheet_id)
+    sheet:Sheets = sheet_client.get_sheet(sheet_id=sheet_id)
     rows = sheet.rows
 
     filtered_rows = []
@@ -109,12 +84,12 @@ def get_rows_awaiting_saving(smartsheet_client: Smartsheet, sheet_id:int):
 
     return filtered_rows
 
-def save_epr_attachments_to_box(smartsheet_client: Smartsheet, filtered_rows: list, error_map: dict):
+def save_epr_attachments_to_box(smartsheet_attachments_client: Attachments, filtered_rows: list, error_map: dict):
     """
     Save all the filtered row's attachements in to Box
     
     Args:
-        smartsheet_client: Smartsheet client object
+        smartsheet_attachments_client: Smartsheet's Attachment SDK object
         filtered_rows: Smartsheet Employees sheet rows that status == 'Saving to Box'
         error_map: carries errors for each row if any occurs
     
@@ -131,7 +106,7 @@ def save_epr_attachments_to_box(smartsheet_client: Smartsheet, filtered_rows: li
     for idx, row in enumerate(filtered_rows):
         row_id = row[0].get("rowId")
         # [ASK] - Upload all attachments? Or just the latest one?
-        response: IndexResult = smartsheet_client.Attachments.list_row_attachments(SHEET_ID, row_id)
+        response: IndexResult = smartsheet_attachments_client.list_row_attachments(SHEET_ID, row_id)
         attachments = response.data
         if len(attachments) == 0:
             error_map[row_id].append(NO_ATTACHMENT_ERROR_MESSAGE)
@@ -143,7 +118,7 @@ def save_epr_attachments_to_box(smartsheet_client: Smartsheet, filtered_rows: li
 
         # Have to manually fetch AGAIN the attachment because of a bug where listing attachments
         # removes the url from the object. Therefore, can not download attachment.
-        attachment: Attachment = smartsheet_client.Attachments.get_attachment(SHEET_ID, attachment_id)
+        attachment: Attachment = smartsheet_attachments_client.get_attachment(SHEET_ID, attachment_id)
         attachment_url = attachment.url
         
         # Parse the columns. Will need to update columns if columns are ever increased/decreased.
@@ -176,12 +151,12 @@ def save_epr_attachments_to_box(smartsheet_client: Smartsheet, filtered_rows: li
             logger.warning(f"🚧 ({counter}) Error uploading file: {err}")
             error_map[row_id].append(ATTACHMENT_UNKNOWN_ERROR_MESSAGE)
 
-def copy_smartsheet_rows_to_history_table(smartsheet_client: Smartsheet, filtered_rows: list, error_map: dict):
+def copy_smartsheet_rows_to_history_table(sheet_client: Sheets, filtered_rows: list, error_map: dict):
     """
     Save all the successful rows to the history table
     
     Args:
-        smartsheet_client: Smartsheet client object
+        sheet_client: Smartsheet's sheet client
         filtered_rows: Smartsheet Employees sheet rows that status == 'Saving to Box'
         error_map: carries errors for each row if any occurs
     
@@ -210,7 +185,7 @@ def copy_smartsheet_rows_to_history_table(smartsheet_client: Smartsheet, filtere
                 })
             })
 
-            response = smartsheet_client.Sheets.copy_rows(
+            response = sheet_client.copy_rows(
                 SHEET_ID,
                 copy_request
             )
@@ -220,7 +195,7 @@ def copy_smartsheet_rows_to_history_table(smartsheet_client: Smartsheet, filtere
 
             today_string = date.today().strftime(DATE_FORMAT)
 
-            sheet = smartsheet_client.Sheets.get_sheet(HISTORY_SHEET_ID)
+            sheet = sheet_client.get_sheet(HISTORY_SHEET_ID)
             leftmost_col_id = sheet.columns[0].id
 
             update_row = smartsheet.models.Row()
@@ -233,7 +208,7 @@ def copy_smartsheet_rows_to_history_table(smartsheet_client: Smartsheet, filtere
             ]
 
             # Apply the update
-            smartsheet_client.Sheets.update_rows(
+            sheet_client.update_rows(
                 HISTORY_SHEET_ID,
                 [update_row]
             )
@@ -245,12 +220,12 @@ def copy_smartsheet_rows_to_history_table(smartsheet_client: Smartsheet, filtere
             logger.exception(f"🚧 ({counter}) Error saving row to history table for {first_name} {last_name}")
             error_map[row_id].append(COPY_SMARTSHEET_ROW_ERROR_MESSAGE)
         
-def reset_columns_for_next_epr_due_date(smartsheet_client: Smartsheet, filtered_rows: list, error_map: dict):
+def reset_columns_for_next_epr_due_date(sheet_client: Sheets, smartsheet_attachments_client: Attachments, filtered_rows: list, error_map: dict):
     """
     Reset all the successful rows, preparing them for the next EPR due date
     
     Args:
-        smartsheet_client: Smartsheet client object
+        sheet_client: Smartsheet's sheet client object
         filtered_rows: Smartsheet Employees sheet rows that status == 'Saving to Box'
         error_map: carries errors for each row if any occurs
     
@@ -418,12 +393,12 @@ def reset_columns_for_next_epr_due_date(smartsheet_client: Smartsheet, filtered_
             })
 
             # Delete all attachments in the row
-            attachments = smartsheet_client.Attachments.list_row_attachments(SHEET_ID, row_id).data
+            attachments = smartsheet_attachments_client.list_row_attachments(SHEET_ID, row_id).data
             for attachment in attachments:
                 logger.info(f"  attachment: {attachment.name} successfully deleted")
-                smartsheet_client.Attachments.delete_attachment(SHEET_ID, attachment.id)
+                smartsheet_attachments_client.delete_attachment(SHEET_ID, attachment.id)
 
-            smartsheet_client.Sheets.update_rows(SHEET_ID, [row_to_update])
+            sheet_client.update_rows(SHEET_ID, [row_to_update])
             counter = f"{idx+1}/{len(filtered_rows)}"
             logger.info(f"✅ ({counter}) Successfully reset row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
         except Exception:
@@ -435,16 +410,18 @@ def main():
     # Get Smartsheet Client
     try:
         logger.info(f"🤖 Fetching Smartsheet Client...")
-        smartsheet_client = get_smartsheet_client(access_token=SMARTSHEET_ACCESS_TOKEN)
+        smartsheet_client: Smartsheet = get_smartsheet_client()
+        sheet_client: Sheets = Sheets(smartsheet_client)
+        smartsheet_attachments_object: Attachments = Attachments(smartsheet_client)
         logger.info(f"✅ Successfully found a valid Smartsheet Client...")
-    except RuntimeError as err:
+    except RuntimeError:
         logger.exception("\n❌ Failed to fetch smartsheet client...")
         return
 
 
     # Get rows by status == "Saving to Box"
     try:
-        filtered_rows = get_rows_awaiting_saving(smartsheet_client=smartsheet_client, sheet_id=SHEET_ID)
+        filtered_rows = get_rows_awaiting_saving(sheet_client, sheet_id=SHEET_ID)
         if len(filtered_rows) == 0:
             logger.info("✅ Finished early. No rows with status 'Saving to Box'")
             return
@@ -456,7 +433,7 @@ def main():
     # Send/save EPR attachment(s) to Box
     try:
         logger.info(f"📦 Saving {len(filtered_rows)} EPR attachment(s) to Box")
-        save_epr_attachments_to_box(smartsheet_client, filtered_rows, error_map)
+        save_epr_attachments_to_box(smartsheet_attachments_object, filtered_rows, error_map)
 
         if error_map:
             logger.warning(f"🚧 ({len(error_map)} of {len(filtered_rows)}) EPRs had some errors. Sending errors to designated email... ")
@@ -467,21 +444,21 @@ def main():
 
         successful_epr_count = len(filtered_rows) - len(error_map)
         logger.info(f"Successfully saved {successful_epr_count} EPRs to Box...\n")
-    except Exception as err:
+    except Exception:
         logger.exception("\n❌ Failed to save attachments to Box...")
         return
 
     # Copy row to history records table in Smartsheet
     try:
         logger.info(f"💽 Copying {successful_epr_count} rows to the history records table...")
-        copy_smartsheet_rows_to_history_table(smartsheet_client, filtered_rows, error_map)
+        copy_smartsheet_rows_to_history_table(sheet_client, filtered_rows, error_map)
 
         if len(error_map) > 0 and len(error_map) == len(filtered_rows):
             raise RuntimeError("Every single row failed to save to history map. Please contact this email... ")
         
         successful_epr_count = len(filtered_rows) - len(error_map)
         logger.info(f"Successfully saved {successful_epr_count} rows to the history records table...\n")
-    except Exception as err:
+    except Exception:
         # Similarly, if this is ran, then a MAJOR error likely occurred.
         logger.exception("\n❌ Failed to save rows to history table...")
         return
@@ -489,14 +466,14 @@ def main():
     # Reset rows to prepare for next EPR
     try:
         logger.info(f"🧼 Resetting {successful_epr_count} rows, preparing them for their next EPR due date...")
-        reset_columns_for_next_epr_due_date(smartsheet_client, filtered_rows, error_map)
+        reset_columns_for_next_epr_due_date(sheet_client, smartsheet_attachments_object, filtered_rows, error_map)
 
         if len(error_map) > 0 and len(error_map) == len(filtered_rows):
             raise RuntimeError("Every single row failed to reset for their next EPR due date. Please contact this email... ")
         
         successful_epr_count = len(filtered_rows) - len(error_map)
         logger.info(f"Successfully reset {successful_epr_count} rows for their next EPR due date...")
-    except Exception as err:
+    except Exception:
         logger.exception("\n❌ Failed to reset successful rows for their next EPR due date...")
         return
 
