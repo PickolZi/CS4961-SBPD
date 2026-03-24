@@ -11,6 +11,22 @@ logger = logging.getLogger(__name__)
 
 class Config:
     #####################
+    # EPR Tracker Project
+    #####################
+    class EPRTracker:
+        class Smartsheet:
+            EPR_TRACKER_TABLE_ID = 2190844477001604
+            STATUS_COLUMN_ID = 3021833052573572
+            FIRST_NAME_COLUMN_ID = 6399532773101444
+            LAST_NAME_COLUMN_ID = 4147732959416196
+            JOB_CLASS_COLUMN_ID = 8651332586786692
+            EMPLOYMENT_STATUS_COLUMN_ID = 1614458169020292
+            PROBATION_QUARTER_COLUMN_ID = 6118057796390788
+            SIGNED_EPR_DUE_DATE_COLUMN_ID = 1051508215598980
+            PREVIOUS_EPR_SIGNED_DATE_COLUMN_ID = 5555107842969476
+            PREVIOUS_EPR_ACTUAL_DUE_DATE_COLUMN_ID = 3303308029284228
+
+    #####################
     # Separations Project
     #####################
     class Separations:
