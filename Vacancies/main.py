@@ -50,6 +50,11 @@ def validate_environment_variables():
     if not Config.Vacancies.Box.USED_DEN_FILES_FOLDER_ID:
         has_error = True
         logger.error("❌ BOX_USED_DEN_FILES_FOLDER_ID is missing/blank.")
+    
+    #Dempsey's addtion for Invalid Den Files
+    if not Config.Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID:
+        has_error = True
+        logger.error("❌ BOX_INVALID_DEN_FILES_FOLDER_ID is missing/blank.")
 
     # Get Smartsheet and Box.com clients
     global sheets_client, box_client
@@ -63,11 +68,22 @@ def validate_environment_variables():
 
 def get_sheet(sheet_id: int) -> Sheet:
     logger.info(f"Retrieving Vacancies & Recruitment sheet with id: '{sheet_id}' from Smartsheet...")
-    res = sheets_client.get_sheet(sheet_id)
 
-    if type(res) == smartsheet.models.Error:
-        raise RuntimeError(f"Smartsheet sheet with id: '{sheet_id}' likely does not exist.")
-    
+    try:
+        res = sheets_client.get_sheet(sheet_id)
+    except Exception as err:
+        raise RuntimeError(
+            f"Failed to retrieve Smartsheet sheet with id: '{sheet_id}'. "
+            f"This may be a temporary Smartsheet/API issue, not necessarily a missing sheet. "
+            f"Original error: {err}"
+        )
+
+    if isinstance(res, smartsheet.models.Error):
+        raise RuntimeError(
+            f"Failed to retrieve Smartsheet sheet with id: '{sheet_id}'. "
+            f"Smartsheet returned an error response: {res}"
+        )
+
     logger.info(f"✅ Successfully retrieved Vacancies & Recruitment sheet with id: '{sheet_id}' from Smartsheet.")
     return res
 
@@ -91,6 +107,7 @@ def get_existing_pairs(sheet: Sheet, smartsheet_cols_map: dict) -> set:
 
     existing = set()
     rows:list[Row] = sheet.rows.to_list()
+
     for row in rows:
         cells:list[Cell] = row.cells.to_list()
         cells_map = {cell.column_id: cell.value for cell in cells}
@@ -109,6 +126,7 @@ def get_existing_pairs(sheet: Sheet, smartsheet_cols_map: dict) -> set:
 
     return existing
 
+# Legacy single-file version kept for reference
 def get_den_byte_stream_from_box() -> BytesIO:
     logger.info("Reading DEN file into memory...")
 
@@ -120,7 +138,9 @@ def get_den_byte_stream_from_box() -> BytesIO:
     global den_id
     global den_name
     for file in box_folder.entries:
-        if file.name.endswith(".xls"):  # Only do one at a time
+        #if file.name.endswith(".xls"):  # Only do one at a time
+        name_lower = file.name.lower()
+        if name_lower.endswith(".xls") or name_lower.endswith(".xlsx"):
             den_id = file.id
             den_name = file.name
 
@@ -136,6 +156,57 @@ def get_den_byte_stream_from_box() -> BytesIO:
         raise RuntimeError(f"❌ Failed to download DEN file with id: '{den_id}' from Box.com.")
 
     logger.info(f"✅ Successfully read DEN file into memory. DEN id: '{den_id}', DEN name: '{den_name}'")
+    return byte_stream
+
+# Dempsey's addition - get all DEN files instead of only one
+def get_den_files_from_box() -> list[dict]:
+    logger.info("Reading DEN files from Box upload folder...")
+
+    try:
+        box_folder: Items = box_client.folders.get_folder_items(
+            Config.Vacancies.Box.DEN_UPLOAD_FOLDER_ID
+        )
+    except BoxAPIError:
+        raise RuntimeError(
+            f"❌ Failed to read DEN files from Box folder with id: {Config.Vacancies.Box.DEN_UPLOAD_FOLDER_ID}"
+        )
+    
+    den_files = []
+    for file in box_folder.entries:
+        name_lower = file.name.lower()
+        if name_lower.endswith(".xls") or name_lower.endswith(".xlsx"): # keep this as .xls for now, and xlsx
+            den_files.append({
+                "id": file.id,
+                "name": file.name
+            })
+    if not den_files:
+        raise FileNotFoundError(
+            f"❌ Failed to find DEN file in Box folder with id: {Config.Vacancies.Box.DEN_UPLOAD_FOLDER_ID}"
+        )
+
+    # Optional: newest name first if names start with timestamps
+    den_files.sort(key=lambda f: f["name"], reverse=True)
+
+    for file in den_files:
+        logger.info(f"Queued DEN file -> id: '{file['id']}', name: '{file['name']}'")
+
+    return den_files
+
+
+# Dempsey's addition - download one specific DEN file
+def download_den_file(file_id: str, file_name: str) -> BytesIO:
+    logger.info(f"Reading DEN file into memory...")
+    logger.info(f"Attempting DEN id: '{file_id}', DEN name: '{file_name}'")
+
+    try:
+        byte_stream = BytesIO()
+        for chunk in box_client.downloads.download_file(file_id):
+            byte_stream.write(chunk)
+        byte_stream.seek(0)
+    except BoxAPIError:
+        raise RuntimeError(f"❌ Failed to download DEN file with id: '{file_id}' from Box.com.")
+
+    logger.info(f"✅ Successfully read DEN file into memory. DEN id: '{file_id}', DEN name: '{file_name}'")
     return byte_stream
 
 def read_and_validate_den_xls(byte_stream: BytesIO) -> pd.DataFrame:
@@ -163,15 +234,24 @@ def read_and_validate_den_xls(byte_stream: BytesIO) -> pd.DataFrame:
 
     return df
 
-def move_invalid_den_file():
-    logger.info(f"Moving invalid DEN file: '{den_name}' to invalid DEN folder: '{Config.Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID}'...")
+def move_invalid_den_file(file_id=None, file_name=None):
+    if file_id is None:
+        file_id = den_id
+    if file_name is None:
+        file_name = den_name
+
+    logger.info(f"Moving invalid DEN file: '{file_name}' to invalid DEN folder: '{Config.Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID}'...")
 
     # Append timestamp to DEN name. Lets people know when DEN file was read and DEN names have to be unique per folder.
     current_datetime = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    new_den_name = f"{current_datetime}-{den_name}"
-    box_client.files.update_file_by_id(den_id, name=new_den_name, parent=UpdateFileByIdParent(id=Config.Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID))
+    new_den_name = f"{current_datetime}-{file_name}"
+    box_client.files.update_file_by_id(
+        file_id,
+        name=new_den_name,
+        parent=UpdateFileByIdParent(id=Config.Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID)
+    )
 
-    logger.info(f"✅ Successfully moved invalid DEN file: '{den_name}' to invalid DEN folder: '{Config.Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID}'")
+    logger.info(f"✅ Successfully moved invalid DEN file: '{file_name}' to invalid DEN folder: '{Config.Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID}'")
 
 def create_new_rows_in_smartsheet(df: pd.DataFrame, smartsheet_cols_map: dict, existing_pairs: set):
     logger.info(f"Creating {len(df)} new rows in Smartsheet...")
@@ -212,15 +292,66 @@ def create_new_rows_in_smartsheet(df: pd.DataFrame, smartsheet_cols_map: dict, e
 
     logger.info(f"✅ Successfully created {len(df)-dupe_entries_count} new rows in Smartsheet.")
 
-def move_den_file():
-    logger.info(f"Moving used DEN file: '{den_name}' to used DEN folder: '{Config.Vacancies.Box.USED_DEN_FILES_FOLDER_ID}'")
+def move_den_file(file_id=None, file_name=None):
+    if file_id is None:
+        file_id = den_id
+    if file_name is None:
+        file_name = den_name
+
+    logger.info(f"Moving used DEN file: '{file_name}' to used DEN folder: '{Config.Vacancies.Box.USED_DEN_FILES_FOLDER_ID}'")
 
     # Append timestamp to DEN name. Lets people know when DEN file was read and DEN names have to be unique per folder.
     current_datetime = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    new_den_name = f"{current_datetime}-{den_name}"
-    box_client.files.update_file_by_id(den_id, name=new_den_name, parent=UpdateFileByIdParent(id=Config.Vacancies.Box.USED_DEN_FILES_FOLDER_ID))
+    new_den_name = f"{current_datetime}-{file_name}"
+    box_client.files.update_file_by_id(
+        file_id,
+        name=new_den_name,
+        parent=UpdateFileByIdParent(id=Config.Vacancies.Box.USED_DEN_FILES_FOLDER_ID)
+    )
 
-    logger.info(f"✅ Successfully moved used DEN file: '{den_name}' to used DEN folder: '{Config.Vacancies.Box.USED_DEN_FILES_FOLDER_ID}'")
+    logger.info(f"✅ Successfully moved used DEN file: '{file_name}' to used DEN folder: '{Config.Vacancies.Box.USED_DEN_FILES_FOLDER_ID}'")
+
+def process_single_den_file(file_id: str, file_name: str, smartsheet_cols_map: dict, existing_pairs: set):
+    # Dempsey's addition - reject .xlsx for now and move to invalid
+    if file_name.lower().endswith(".xlsx"):
+        logger.warning(f"🚧 Skipping unsupported .xlsx DEN file and moving to Invalid: '{file_name}'")
+        try:
+            move_invalid_den_file(file_id, file_name)
+        except:
+            logger.exception(f"❌ Failed to move invalid DEN file: '{file_name}' to folder: {Config.Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID}")
+        return
+
+    try:
+        byte_stream = download_den_file(file_id, file_name)
+    except Exception:
+        logger.exception(f"❌ Failed to download DEN file: '{file_name}'")
+        return
+
+    try:
+        df = read_and_validate_den_xls(byte_stream)
+        if len(df) == 0:
+            logger.info(f"DEN file '{file_name}' has no valid rows to add. Moving to invalid.")
+            move_invalid_den_file(file_id, file_name)
+            return
+    except Exception:
+        logger.exception(f"❌ Failed to read or validate DEN file: '{file_name}'.")
+        try:
+            move_invalid_den_file(file_id, file_name)
+        except:
+            logger.exception(f"❌ Failed to move invalid DEN file: '{file_name}' to folder: {Config.Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID}")
+        return
+
+    try:
+        create_new_rows_in_smartsheet(df, smartsheet_cols_map, existing_pairs)
+    except Exception:
+        logger.exception(f"❌ Failed to create new row(s) in Smartsheet for DEN file: '{file_name}'.")
+        return
+
+    try:
+        move_den_file(file_id, file_name)
+    except:
+        logger.exception(f"❌ Failed to move used DEN file: '{file_name}' to old folder.")
+        return
 
 def main():
     # Validate environment variables to ensure they all exists and are valid
@@ -253,40 +384,21 @@ def main():
         logger.exception(f"❌ Failed to fetch (dept_id, pos_id) pairs from Smartsheet.")
         return
 
-    # Read DEN file bytestream if it exists from Box.com. Will be passed to the following method.
+    # Dempsey's addition - get all DEN files from Box instead of only one
     try:
-        byte_stream = get_den_byte_stream_from_box()
+        den_files = get_den_files_from_box()
     except Exception as e:
         logger.exception(e)
         return
 
-    # Read DEN file and make sure it has the appropriate data
-    try:
-        df = read_and_validate_den_xls(byte_stream)
-        if len(df) == 0:
-            logger.info("DEN file has no valid rows to add. Exiting script early.")
-            return
-    except Exception:
-        logger.exception("❌ Failed to read or validate DEN file. Exiting program.")
-        try:
-            move_invalid_den_file()
-        except:
-            logger.exception(f"❌ Failed to move invalid DEN file: '{den_name}' to folder: {Config.Vacancies.Box.INVALID_DEN_FILES_FOLDER_ID}")
-        return
-
-    # Send create row(s) SDK request to Smartsheet
-    try:
-        create_new_rows_in_smartsheet(df, smartsheet_cols_map, existing_pairs)
-    except Exception:
-        logger.exception("❌ Failed to create new row(s) in Smartsheet. Exiting program.")
-        return
-    
-    # Move the read DEN file to the used folder in Box.com
-    try:
-        move_den_file()
-    except:
-        logger.exception("❌ Failed to move used DEN file to old folder.")
-        return
+    # Dempsey's addition - process every DEN file found in upload folder
+    for den_file in den_files:
+        process_single_den_file(
+            den_file["id"],
+            den_file["name"],
+            smartsheet_cols_map,
+            existing_pairs
+        )
 
 
 if __name__ == "__main__":
