@@ -33,7 +33,7 @@ class Config:
         class Email:
             SMTP_SERVER = "smtp.gmail.com"
             PORT = 587
-            SENDER_ADDRESS = "pickol876@gmail.com"
+            SENDER_ADDRESS = os.getenv("GMAIL_SENDER_ADDRESS")
             SENDER_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
             SUBJECT = "SBPD - Separation Information email IMPORTANT!"
         
