@@ -9,7 +9,7 @@ from smartsheet.models import Cell, Row
 BASE_DIR = Path(__file__).resolve().parents[1]
 sys.path.append(str(BASE_DIR / "layers" / "shared" / "python"))
 
-from api import get_smartsheet_client
+from api import get_smartsheet_sheets_client
 from shared_config.config import Config
 
 logger = logging.getLogger("personnel_matters")
@@ -244,7 +244,7 @@ def main(row_ids: list[int] | None = None):
             try:
                 result = process_row(
                     sheet_client=sheet_client,
-                    row_id=row_id,
+                    row_id=int(row_id),
                     column_map=column_map,
                     title_to_column_id=title_to_column_id,
                 )

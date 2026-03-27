@@ -19,7 +19,7 @@ from io import BytesIO
 sys.path.append("../layers/shared/python/")  # Necessary for DEV staging. AWS auto imports this file
 from shared_config.constants import Settings
 from shared_config.config import Config
-from api import get_smartsheet_client, get_box_client
+from api import get_smartsheet_sheets_client, get_box_client
 
 logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
 logger = logging.getLogger("vacancies")
@@ -58,7 +58,7 @@ def validate_environment_variables():
 
     # Get Smartsheet and Box.com clients
     global sheets_client, box_client
-    sheets_client = get_smartsheet_client()
+    sheets_client = get_smartsheet_sheets_client()
     box_client = get_box_client()
 
     if has_error:
