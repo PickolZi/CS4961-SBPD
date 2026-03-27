@@ -41,6 +41,7 @@ logger = logging.getLogger("separations")
 logger.setLevel(logging.INFO)
 
 if Settings.STAGE == Settings.Stage.DEV:
+    logger.propagate = False
     logger_stream_handler = logging.StreamHandler()
     logger_stream_handler.setFormatter(logging.Formatter("%(asctime)s:[%(levelname)s]:%(message)s"))
     logger.addHandler(logger_stream_handler)
@@ -287,6 +288,14 @@ def update_separation_contacts_email_status(sheet_client: Sheets, contacts: list
 
 
 def main():
+    # Validate email environment variables
+    if not Config.Separations.Email.SENDER_ADDRESS: #not sure if we need this line, depends on if we keep the env variable change I made
+        logger.error("❌ Missing environment variable: GMAIL_SENDER_ADDRESS")
+        sys.exit(1)
+    if not Config.Separations.Email.SENDER_APP_PASSWORD:
+        logger.error("❌ Missing environment variable: GMAIL_APP_PASSWORD")
+        sys.exit(1)
+    
     # Get Smartsheet and Box client
     try:
         sheet_client: Sheets = get_smartsheet_sheets_client()

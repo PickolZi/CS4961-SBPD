@@ -4,6 +4,8 @@ import logging
 from datetime import date
 from dotenv import load_dotenv
 
+from .secrets import get_secret
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -33,8 +35,8 @@ class Config:
         class Email:
             SMTP_SERVER = "smtp.gmail.com"
             PORT = 587
-            SENDER_ADDRESS = "pickol876@gmail.com"
-            SENDER_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
+            SENDER_ADDRESS = get_secret("GMAIL_SENDER_ADDRESS")
+            SENDER_APP_PASSWORD = get_secret("GMAIL_APP_PASSWORD")
             SUBJECT = "SBPD - Separation Information email IMPORTANT!"
         
         class Smartsheet:
