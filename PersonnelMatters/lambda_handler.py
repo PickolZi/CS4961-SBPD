@@ -13,13 +13,20 @@ logger.setLevel(logging.INFO)
 
 
 def lambda_handler(event, context):
-    headers = event.get("headers", {})
+    headers = event.get("headers", {}) or {}
     body = {}
 
     logger.info(f"headers: {headers}")
 
+    raw_body = event.get("body", "{}")
+
     try:
-        body = json.loads(event.get("body", "{}"))
+        if isinstance(raw_body, str):
+            body = json.loads(raw_body)
+        elif isinstance(raw_body, dict):
+            body = raw_body
+        else:
+            raise TypeError("Unsupported body type")
     except json.JSONDecodeError:
         logger.exception("Invalid JSON in request body")
         return {
@@ -35,7 +42,6 @@ def lambda_handler(event, context):
 
     logger.info(f"body: {body}")
 
-    # Smartsheet webhook verification challenge
     challenge_value = headers.get("Smartsheet-Hook-Challenge")
     if challenge_value:
         logger.info(f"Received verification challenge: {challenge_value}")
@@ -56,7 +62,7 @@ def lambda_handler(event, context):
             "body": json.dumps({"message": "No events found"}),
         }
 
-    should_run = False
+    row_ids_to_process = []
 
     for webhook_event in events:
         object_type = webhook_event.get("objectType")
@@ -64,29 +70,38 @@ def lambda_handler(event, context):
         row_id = webhook_event.get("rowId")
         event_id = webhook_event.get("id")
 
-        if object_type == "row" and event_type == "created":
-            logger.info(f"Personnel Matters row created. row_id={row_id}, event_id={event_id}")
-            should_run = True
-            break
+        if object_type == "row" and event_type in {"created", "updated"} and row_id:
+            logger.info(
+                "Personnel Matters event detected. event_type=%s row_id=%s event_id=%s",
+                event_type,
+                row_id,
+                event_id,
+            )
+            row_ids_to_process.append(int(row_id))
 
-        elif event_type == "updated":
-            logger.info(f"Personnel Matters update detected. row_id={row_id}, event_id={event_id}")
-            should_run = True
-            break
+    row_ids_to_process = list(dict.fromkeys(row_ids_to_process))
 
-    if should_run:
+    if row_ids_to_process:
         try:
-            main()
+            results = main(row_ids=row_ids_to_process)
+            return {
+                "statusCode": 200,
+                "body": json.dumps(
+                    {
+                        "message": "Personnel Matters webhook received",
+                        "processed_rows": results,
+                    }
+                ),
+            }
         except Exception:
             logger.exception("Personnel Matters main() failed.")
             return {
                 "statusCode": 500,
                 "body": json.dumps({"message": "Personnel Matters workflow failed"}),
             }
-    else:
-        logger.info("No relevant Personnel Matters events detected.")
 
+    logger.info("No relevant Personnel Matters events detected.")
     return {
         "statusCode": 200,
-        "body": json.dumps({"message": "Personnel Matters webhook received"}),
+        "body": json.dumps({"message": "No relevant Personnel Matters events"}),
     }
