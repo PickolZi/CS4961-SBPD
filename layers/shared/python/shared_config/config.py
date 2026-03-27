@@ -75,6 +75,9 @@ class Config:
     class PersonnelMatters:
         class Smartsheet:
             PERSONNEL_MATTERS_TABLE_ID = 1234840859922308
+
+        class Box:
+            ROOT_PARENT_FOLDER_ID = 373189297640
     
 
     #####################
