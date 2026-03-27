@@ -1,6 +1,5 @@
-import os, sys
+import sys
 import logging
-from enum import Enum
 from datetime import date, datetime
 from collections import defaultdict
 from dotenv import load_dotenv
@@ -10,13 +9,15 @@ from smartsheet.smartsheet import Smartsheet
 from smartsheet.sheets import Sheets
 from smartsheet.attachments import Attachments
 from smartsheet.models.index_result import IndexResult
-from smartsheet.models import Attachment
+from smartsheet.models import Attachment, Error
+
+from model import SmartsheetEPRTrackerRow, EPRTrackerStatus, EPREmploymentStatus, EPRProbationQuarter
 
 import box as box_helper
 
 sys.path.append("../layers/shared/python/")  # Necessary for DEV staging. AWS auto imports this file
 from shared_config.constants import Settings
-# from shared_config.config import Config
+from shared_config.config import Config
 from api import get_smartsheet_client, get_box_client
 
 """
@@ -41,8 +42,6 @@ if Settings.STAGE == Settings.Stage.DEV:
     logger.addHandler(logger_stream_handler)
 
 
-SHEET_ID = 2190844477001604
-HISTORY_SHEET_ID = 8040061653176196
 error_map = defaultdict(list)  # Will email to someone to fix manually
 """
 error_map = {
@@ -55,36 +54,23 @@ DATE_FORMAT = "%Y-%m-%d"
 load_dotenv()
 
 
-def get_rows_awaiting_saving(sheet_client: Sheets, sheet_id:int):
+def get_rows_awaiting_saving(sheet_client: Sheets) -> list[SmartsheetEPRTrackerRow]:
     """
-    Fetches rows that have the status=='Saving to Box'
+    Fetches Smartsheet rows that have the status=='Saving to Box'
     
     Args:
         sheet_client: Smartsheet's Sheet SDK object
-        sheet_id: Smartsheet Employees sheet id
     
     Returns:
-        Smartsheet object or raise Smartsheet Error
+        list[SmartsheetEPRTrackerRow] or raise Smartsheet Error
     """
-    SAVING_STATUS = "Saving to Box"
 
-    sheet:Sheets = sheet_client.get_sheet(sheet_id=sheet_id)
-    rows = sheet.rows
+    sheet:Sheets = sheet_client.get_sheet(Config.EPRTracker.Smartsheet.EPR_TRACKER_TABLE_ID)
+    smartsheet_rows = SmartsheetEPRTrackerRow.parse_smartsheet_epr_tracker_table(sheet)
+    filtered_smartsheet_rows = list(filter(lambda x: x.status == EPRTrackerStatus.SAVING_TO_BOX, smartsheet_rows))
+    return filtered_smartsheet_rows
 
-    filtered_rows = []
-    for row in rows:
-        row = row.to_dict()
-        row_id = row.get("id")
-        cells = row.get("cells")
-        row_status = cells[0].get("value","")
-
-        filtered_row = [{"rowId": row_id}] + cells
-        if row_status.lower() == SAVING_STATUS.lower():
-            filtered_rows.append(filtered_row)
-
-    return filtered_rows
-
-def save_epr_attachments_to_box(smartsheet_attachments_client: Attachments, filtered_rows: list, error_map: dict):
+def save_epr_attachments_to_box(smartsheet_attachments_client: Attachments, filtered_rows: list[SmartsheetEPRTrackerRow], error_map: dict):
     """
     Save all the filtered row's attachements in to Box
     
@@ -104,9 +90,10 @@ def save_epr_attachments_to_box(smartsheet_attachments_client: Attachments, filt
     ATTACHMENT_UNKNOWN_ERROR_MESSAGE = "Attachment failed to upload to Box for an unknown reason"
 
     for idx, row in enumerate(filtered_rows):
-        row_id = row[0].get("rowId")
+        row_id = row.row_id
+
         # [ASK] - Upload all attachments? Or just the latest one?
-        response: IndexResult = smartsheet_attachments_client.list_row_attachments(SHEET_ID, row_id)
+        response: IndexResult = smartsheet_attachments_client.list_row_attachments(Config.EPRTracker.Smartsheet.EPR_TRACKER_TABLE_ID, row_id)
         attachments = response.data
         if len(attachments) == 0:
             error_map[row_id].append(NO_ATTACHMENT_ERROR_MESSAGE)
@@ -118,26 +105,16 @@ def save_epr_attachments_to_box(smartsheet_attachments_client: Attachments, filt
 
         # Have to manually fetch AGAIN the attachment because of a bug where listing attachments
         # removes the url from the object. Therefore, can not download attachment.
-        attachment: Attachment = smartsheet_attachments_client.get_attachment(SHEET_ID, attachment_id)
-        attachment_url = attachment.url
+        attachment: Attachment = smartsheet_attachments_client.get_attachment(Config.EPRTracker.Smartsheet.EPR_TRACKER_TABLE_ID, attachment_id)
         
         # Parse the columns. Will need to update columns if columns are ever increased/decreased.
-        first_name = row[5]["value"].upper()
-        last_name = row[6]["value"].upper()
         today_string = date.today().strftime(DATE_FORMAT)
+        filename = f"{today_string}-{row.last_name}-{row.first_name}.pdf"
 
-        # Uncomment to get columns
-        # for cell in row[1:]:
-        #     print(cell)
-
-        # [ASK] - What format should the EPR copies be?
-        # LASTNAME-FIRSTNAME-YYYY-MM-DD-EPR
-        filename = f"{last_name}-{first_name}-{today_string}.pdf"
-
-        # # Use box helper to upload attachment from Smartsheet to Box
+        # Use box helper to upload attachment from Smartsheet to Box
         counter = f"{idx+1}/{len(filtered_rows)}"
         try:
-            uploaded_file = box_helper.upload_file_to_box_by_url(attachment_url, filename)
+            uploaded_file = box_helper.upload_file_to_box_by_url(attachment.url, filename)
             logger.info(f"✅ ({counter}) File uploaded successfully!")
             logger.info(f"  File ID: {uploaded_file.id}")
             logger.info(f"  File Name: {uploaded_file.name}")
@@ -151,7 +128,7 @@ def save_epr_attachments_to_box(smartsheet_attachments_client: Attachments, filt
             logger.warning(f"🚧 ({counter}) Error uploading file: {err}")
             error_map[row_id].append(ATTACHMENT_UNKNOWN_ERROR_MESSAGE)
 
-def copy_smartsheet_rows_to_history_table(sheet_client: Sheets, filtered_rows: list, error_map: dict):
+def copy_smartsheet_rows_to_history_table(sheet_client: Sheets, filtered_rows: list[SmartsheetEPRTrackerRow], error_map: dict):
     """
     Save all the successful rows to the history table
     
@@ -169,9 +146,9 @@ def copy_smartsheet_rows_to_history_table(sheet_client: Sheets, filtered_rows: l
     COPY_SMARTSHEET_ROW_ERROR_MESSAGE = "Row failed to be saved in the history table"
 
     for idx,row in enumerate(filtered_rows):
-        row_id = row[0]["rowId"]
-        first_name = row[5]["value"].upper()
-        last_name = row[6]["value"].upper()
+        row_id = row.row_id
+        first_name = row.first_name.upper()
+        last_name = row.last_name.upper()
 
         # We don't want rows that previously have had errors.
         if row_id in error_map:
@@ -181,51 +158,29 @@ def copy_smartsheet_rows_to_history_table(sheet_client: Sheets, filtered_rows: l
             copy_request = smartsheet.models.CopyOrMoveRowDirective({
                 "row_ids": [row_id],
                 "to": smartsheet.models.CopyOrMoveRowDestination({
-                    "sheet_id": HISTORY_SHEET_ID
+                    "sheet_id": Config.EPRTracker.Smartsheet.EPR_TRACKER_HISTORY_TABLE_ID
                 })
             })
 
-            response = sheet_client.copy_rows(
-                SHEET_ID,
+            sheet_client.copy_rows(
+                Config.EPRTracker.Smartsheet.EPR_TRACKER_TABLE_ID,
                 copy_request
-            )
-
-            response = response.to_dict()
-            date_saved_row_id = response["rowMappings"][0]["to"]
-
-            today_string = date.today().strftime(DATE_FORMAT)
-
-            sheet = sheet_client.get_sheet(HISTORY_SHEET_ID)
-            leftmost_col_id = sheet.columns[0].id
-
-            update_row = smartsheet.models.Row()
-            update_row.id = date_saved_row_id
-            update_row.cells = [
-                smartsheet.models.Cell({
-                    "column_id": leftmost_col_id,
-                    "value": today_string
-                })
-            ]
-
-            # Apply the update
-            sheet_client.update_rows(
-                HISTORY_SHEET_ID,
-                [update_row]
             )
 
             counter = f"{idx+1}/{len(filtered_rows)}"
             logger.info(f"✅ ({counter}) Row successfully copied to history table for {first_name} {last_name}")
-        except Exception as err:
+        except Exception:
             counter = f"{idx+1}/{len(filtered_rows)}"
             logger.exception(f"🚧 ({counter}) Error saving row to history table for {first_name} {last_name}")
             error_map[row_id].append(COPY_SMARTSHEET_ROW_ERROR_MESSAGE)
         
-def reset_columns_for_next_epr_due_date(sheet_client: Sheets, smartsheet_attachments_client: Attachments, filtered_rows: list, error_map: dict):
+def reset_columns_for_next_epr_due_date(sheet_client: Sheets, smartsheet_attachments_client: Attachments, filtered_rows: list[SmartsheetEPRTrackerRow], error_map: dict):
     """
     Reset all the successful rows, preparing them for the next EPR due date
     
     Args:
         sheet_client: Smartsheet's sheet client object
+        smartsheet_attachments_client: Smartsheet's attachments client object
         filtered_rows: Smartsheet Employees sheet rows that status == 'Saving to Box'
         error_map: carries errors for each row if any occurs
     
@@ -239,69 +194,53 @@ def reset_columns_for_next_epr_due_date(sheet_client: Sheets, smartsheet_attachm
     MISSING_PROBATION_QUARTER_ERROR_MESSAGE = "Row failed to be reset because it is missing a probation quarter value"
     RESETTING_SMARTSHEET_ROW_ERROR_MESSAGE = "Row failed to be reset for the next EPR due date"
     TODAYS_DATE = date.today().strftime(DATE_FORMAT)
-
-    class EmploymentStatus(Enum):
-        YEARLY = "yearly"
-        PROBATIONARY = "probationary"
-        FLEX_PROBATIONARY = "flex probationary"
     
-    PROBATION_STATUS_QUARTER_VALUES = ["1Q", "2Q", "3Q", "4Q"]
-    FLEX_PROBATION_STATUS_QUARTER_VALUES = ["1Q", "2Q"]
-    NO_PROBATION_STATUS = "N/A"
-    STATUS_NOT_CREATED = "Not Created"
-
+    PROBATION_STATUS_QUARTER_VALUES = [
+        EPRProbationQuarter.Q1,
+        EPRProbationQuarter.Q2,
+        EPRProbationQuarter.Q3,
+        EPRProbationQuarter.Q4
+    ]
+    FLEX_PROBATION_STATUS_QUARTER_VALUES = [
+        EPRProbationQuarter.Q1,
+        EPRProbationQuarter.Q2
+    ]
 
     for idx,row in enumerate(filtered_rows):
-        row_id = row[0]["rowId"]
-
+        row_id = row.row_id
         # We don't want to update rows that previously have had ANY errors.
         if row_id in error_map:
             continue
 
-        row_info = {
-            "status": row[1],
-            "first_name": row[5],
-            "last_name": row[6],
-            "anniversary_month": row[11],
-            "probationary_epr": row[12],
-            "employment_status": row[13],
-            "probation_quarter": row[14],
-            "probation_due_date": row[15],
-            "late_epr": row[16],
-            "signed_epr_due_date": row[17],
-            "previous_epr_signed": row[18],
-            "previous_epr_actual_due_date": row[19]
-        }
-
         try:
-            logger.info(f"Starting to reset row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
-            employment_status = row_info["employment_status"].get("value", "")
-            probation_quarter = row_info["probation_quarter"].get("value", "")
-            cur_epr_due_date = row_info["signed_epr_due_date"].get("value")
+            logger.info(f"Starting to reset row for {row.first_name} {row.last_name}")
+            employment_status = row.employment_status
+            probation_quarter = row.probation_quarter
+            cur_epr_due_date = row.signed_epr_due_date
 
             cells_to_update = []
 
             # Reset status
             cells_to_update.append(
                 smartsheet.models.Cell({
-                    "column_id": row_info["status"].get("columnId", ""),
-                    "value": STATUS_NOT_CREATED
+                    "column_id": Config.EPRTracker.Smartsheet.STATUS_COLUMN_ID,
+                    "value": EPRTrackerStatus.NOT_CREATED.value
                 })
             )
 
-            updated_epr_due_date = datetime.strptime(cur_epr_due_date, DATE_FORMAT)
+            updated_epr_due_date = cur_epr_due_date
             # EPR_DUE_DATE depends on if they're on probation or not.
             #   +1 Year if yearly
             #   +6 months if flex probation
             #   +3 months if probation
-            if employment_status == EmploymentStatus.YEARLY.value:
+            if employment_status == EPREmploymentStatus.YEARLY:
                 updated_epr_due_date = updated_epr_due_date.replace(year=updated_epr_due_date.year + 1)
-            elif employment_status == EmploymentStatus.FLEX_PROBATIONARY.value:
+            elif employment_status == EPREmploymentStatus.FLEX_PROBATIONARY:
                 if probation_quarter not in FLEX_PROBATION_STATUS_QUARTER_VALUES:
                     if probation_quarter in PROBATION_STATUS_QUARTER_VALUES:
-                        logger.warning(f"🚧 Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}. Probation quarter value can not be 3Q or 4Q")
+                        logger.warning(f"🚧 Error resetting row for {row.first_name} {row.last_name}. Probation quarter value can not be 3Q or 4Q")
                     else:
-                        logger.warning(f"🚧 Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}. Missing probation quarter value")
+                        logger.warning(f"🚧 Error resetting row for {row.first_name} {row.last_name}. Missing probation quarter value")
                         
                     error_map[row_id].append(MISSING_PROBATION_QUARTER_ERROR_MESSAGE)
                     continue
@@ -311,12 +250,12 @@ def reset_columns_for_next_epr_due_date(sheet_client: Sheets, smartsheet_attachm
                     updated_epr_due_date = updated_epr_due_date.replace(year=updated_epr_due_date.year + 1)
                     # Change to yearly employment status and set their probartion quarter to "N/A"
                     cells_to_update.append(smartsheet.models.Cell({
-                        "column_id": row_info["employment_status"].get("columnId"),
-                        "value": EmploymentStatus.YEARLY.value
+                        "column_id": Config.EPRTracker.Smartsheet.EMPLOYMENT_STATUS_COLUMN_ID,
+                        "value": EPREmploymentStatus.YEARLY.value
                     }))
                     cells_to_update.append(smartsheet.models.Cell({
-                        "column_id": row_info["probation_quarter"].get("columnId"),
-                        "value": NO_PROBATION_STATUS
+                        "column_id": Config.EPRTracker.Smartsheet.PROBATION_QUARTER_COLUMN_ID,
+                        "value": EPRProbationQuarter.NA.value
                     }))
                 else:
                     updated_month_value = updated_epr_due_date.month + 6
@@ -325,12 +264,12 @@ def reset_columns_for_next_epr_due_date(sheet_client: Sheets, smartsheet_attachm
                     updated_epr_due_date = updated_epr_due_date.replace(month=updated_month_value)
                     # Increment their probation quarter by 1
                     cells_to_update.append(smartsheet.models.Cell({
-                        "column_id": row_info["probation_quarter"].get("columnId"),
-                        "value": FLEX_PROBATION_STATUS_QUARTER_VALUES[probation_quarter_position+1]
+                        "column_id": Config.EPRTracker.Smartsheet.PROBATION_QUARTER_COLUMN_ID,
+                        "value": FLEX_PROBATION_STATUS_QUARTER_VALUES[probation_quarter_position+1].value
                     }))
-            elif employment_status == EmploymentStatus.PROBATIONARY.value:
+            elif employment_status == EPREmploymentStatus.PROBATIONARY:
                 if probation_quarter not in PROBATION_STATUS_QUARTER_VALUES:
-                    logger.warning(f"🚧 Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}. Missing probation quarter value")
+                    logger.warning(f"🚧 Error resetting row for {row.first_name} {row.last_name}. Missing probation quarter value")
                     error_map[row_id].append(MISSING_PROBATION_QUARTER_ERROR_MESSAGE)
                     continue
 
@@ -339,12 +278,12 @@ def reset_columns_for_next_epr_due_date(sheet_client: Sheets, smartsheet_attachm
                     updated_epr_due_date = updated_epr_due_date.replace(year=updated_epr_due_date.year + 1)
                     # Change to yearly employment status and set their probartion quarter to "N/A"
                     cells_to_update.append(smartsheet.models.Cell({
-                        "column_id": row_info["employment_status"].get("columnId"),
-                        "value": EmploymentStatus.YEARLY.value
+                        "column_id": Config.EPRTracker.Smartsheet.EMPLOYMENT_STATUS_COLUMN_ID,
+                        "value": EPREmploymentStatus.YEARLY.value
                     }))
                     cells_to_update.append(smartsheet.models.Cell({
-                        "column_id": row_info["probation_quarter"].get("columnId"),
-                        "value": NO_PROBATION_STATUS
+                        "column_id": Config.EPRTracker.Smartsheet.PROBATION_QUARTER_COLUMN_ID,
+                        "value": EPRProbationQuarter.NA.value
                     }))
                 else:
                     updated_month_value = updated_epr_due_date.month + 3
@@ -353,56 +292,53 @@ def reset_columns_for_next_epr_due_date(sheet_client: Sheets, smartsheet_attachm
                     updated_epr_due_date = updated_epr_due_date.replace(month=updated_month_value)
                     # Increment their probation quarter by 1
                     cells_to_update.append(smartsheet.models.Cell({
-                        "column_id": row_info["probation_quarter"].get("columnId"),
-                        "value": PROBATION_STATUS_QUARTER_VALUES[probation_quarter_position+1]
+                        "column_id": Config.EPRTracker.Smartsheet.PROBATION_QUARTER_COLUMN_ID,
+                        "value": PROBATION_STATUS_QUARTER_VALUES[probation_quarter_position+1].value
                     }))
             else:
-                logger.warning(f"🚧 Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}. Missing employment status value")
+                logger.warning(f"🚧 Error resetting row for {row.first_name} {row.last_name}. Missing employment status value")
                 error_map[row_id].append(MISSING_EMPLOYMENT_STATUS_ERROR_MESSAGE)
                 continue
 
             signed_epr_due_date_cell = smartsheet.models.Cell({
-                "column_id": row_info["signed_epr_due_date"].get("columnId"),
+                "column_id": Config.EPRTracker.Smartsheet.SIGNED_EPR_DUE_DATE_COLUMN_ID,
                 "value": datetime.strftime(updated_epr_due_date, DATE_FORMAT)
             })
 
             previous_epr_signed_cell = smartsheet.models.Cell({
-                "column_id": row_info["previous_epr_signed"].get("columnId"),
+                "column_id": Config.EPRTracker.Smartsheet.PREVIOUS_EPR_SIGNED_DATE_COLUMN_ID,
                 "value": TODAYS_DATE
             })
 
             previous_epr_actual_due_date_cell = smartsheet.models.Cell({
-                "column_id": row_info["previous_epr_actual_due_date"].get("columnId"),
-                "value": cur_epr_due_date
+                "column_id": Config.EPRTracker.Smartsheet.PREVIOUS_EPR_ACTUAL_DUE_DATE_COLUMN_ID,
+                "value": datetime.strftime(cur_epr_due_date, DATE_FORMAT)
             })
 
             cells_to_update.extend([signed_epr_due_date_cell, previous_epr_signed_cell, previous_epr_actual_due_date_cell])
-            # Reset supervisors/approvals
-            for i in range(20,28+1):
-                cells_to_update.append(
-                    smartsheet.models.Cell({
-                        "column_id": row[i].get("columnId", ""),
-                        "value": ""
-                    })
-                )
-            
+
             # Row to reset
             row_to_update = smartsheet.models.Row({
-                "id": row_id,
+                "id": int(row_id),
                 "cells": cells_to_update
             })
 
             # Delete all attachments in the row
-            attachments = smartsheet_attachments_client.list_row_attachments(SHEET_ID, row_id).data
+            attachments = smartsheet_attachments_client.list_row_attachments(Config.EPRTracker.Smartsheet.EPR_TRACKER_TABLE_ID, row_id).data
             for attachment in attachments:
                 logger.info(f"  attachment: {attachment.name} successfully deleted")
-                smartsheet_attachments_client.delete_attachment(SHEET_ID, attachment.id)
+                smartsheet_attachments_client.delete_attachment(Config.EPRTracker.Smartsheet.EPR_TRACKER_TABLE_ID, attachment.id)
 
-            sheet_client.update_rows(SHEET_ID, [row_to_update])
+            response = sheet_client.update_rows(Config.EPRTracker.Smartsheet.EPR_TRACKER_TABLE_ID, [row_to_update])
+
+            if isinstance(response, Error):
+                raise RuntimeError(response.result.message)
+
             counter = f"{idx+1}/{len(filtered_rows)}"
-            logger.info(f"✅ ({counter}) Successfully reset row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
+            logger.info(f"✅ ({counter}) Successfully reset row for {row.first_name} {row.last_name}")
         except Exception:
-            logger.exception(f"🚧 ({counter}) Error resetting row for {row_info['first_name'].get('value', 'N/A')} {row_info['last_name'].get('value', 'N/A')}")
+            counter = f"{idx+1}/{len(filtered_rows)}"
+            logger.exception(f"🚧 ({counter}) Error resetting row for {row.first_name} {row.last_name}")
             error_map[row_id].append(RESETTING_SMARTSHEET_ROW_ERROR_MESSAGE)
 
 
@@ -421,7 +357,7 @@ def main():
 
     # Get rows by status == "Saving to Box"
     try:
-        filtered_rows = get_rows_awaiting_saving(sheet_client, sheet_id=SHEET_ID)
+        filtered_rows = get_rows_awaiting_saving(sheet_client)
         if len(filtered_rows) == 0:
             logger.info("✅ Finished early. No rows with status 'Saving to Box'")
             return
@@ -462,9 +398,10 @@ def main():
         # Similarly, if this is ran, then a MAJOR error likely occurred.
         logger.exception("\n❌ Failed to save rows to history table...")
         return
-        
+
     # Reset rows to prepare for next EPR
     try:
+        successful_epr_count = len(filtered_rows) - len(error_map)
         logger.info(f"🧼 Resetting {successful_epr_count} rows, preparing them for their next EPR due date...")
         reset_columns_for_next_epr_due_date(sheet_client, smartsheet_attachments_object, filtered_rows, error_map)
 
