@@ -1,4 +1,5 @@
 import sys
+import logging
 from datetime import date, datetime
 from enum import Enum
 
@@ -8,6 +9,17 @@ from smartsheet.models.cell import Cell
 
 sys.path.append("../layers/shared/python/")  # Necessary for DEV staging. AWS auto imports this file
 from shared_config.config import Config
+from shared_config.constants import Settings
+
+
+logging.getLogger("smartsheet").setLevel(logging.WARNING)  # Turn off Smartsheet's logs
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+if Settings.STAGE == Settings.Stage.DEV:
+    logger_stream_handler = logging.StreamHandler()
+    logger_stream_handler.setFormatter(logging.Formatter("%(asctime)s:[%(levelname)s]:%(message)s"))
+    logger.addHandler(logger_stream_handler)
 
 
 class EPRTrackerStatus(Enum):
@@ -131,6 +143,8 @@ class SmartsheetEPRTrackerRow:
             Config.EPRTracker.Smartsheet.PREVIOUS_EPR_ACTUAL_DUE_DATE_COLUMN_ID: "previous_epr_actual_due_date"
         }
 
+        required_columns = set(column_id_to_key_map.values())
+
         resulting_rows:list[SmartsheetEPRTrackerRow] = []
         for row in smartsheet_sheet_data.rows:
             assert isinstance(row, Row), f"Expected smartsheet.models.row.Row, but got {type(row)}"
@@ -142,6 +156,12 @@ class SmartsheetEPRTrackerRow:
 
                 if cell.column_id in column_id_to_key_map:
                     values.setdefault(column_id_to_key_map[cell.column_id], cell.value)
+
+
+            missing_columns = [col_name for col_name in required_columns if not values.get(col_name)]
+            if len(missing_columns) > 0:
+                logger.warning(f"🚧 row with id: '{row.id_}' is missing the following columns: {missing_columns}")
+                continue
             
             # Transforming SmartsheetEPRTrackerRow attributes from strings to their proper data type
             resulting_rows.append(
