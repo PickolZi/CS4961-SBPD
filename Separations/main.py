@@ -47,7 +47,7 @@ if Settings.STAGE == Settings.Stage.DEV:
     logger.addHandler(logger_stream_handler)
 
 
-def generate_missing_payroll_dates_in_smartsheet(sheet_client: Sheets):
+def generate_missing_payroll_dates_in_smartsheet(sheet_client: Sheets) -> list:
     # TODO: Add error handling here
     logger.info(f"Generating missing payroll dates for separating contacts...")
 
@@ -68,7 +68,7 @@ def generate_missing_payroll_dates_in_smartsheet(sheet_client: Sheets):
     
     if len(contacts) == 0:
         logger.info("Smartsheet had 0 employees with the 'awaiting email' status. Exiting program.")
-        sys.exit(1)
+        return contacts
     logger.info(f"Smartsheet found {len(contacts)} employees to generate payroll dates.")
 
     # Fetch SBPD recognized holidays
@@ -134,6 +134,7 @@ def generate_missing_payroll_dates_in_smartsheet(sheet_client: Sheets):
 
     sheet_client.update_rows(Config.Separations.Smartsheet.SEPARATIONS_TRACKER_TABLE_ID, rows_to_update)
     logger.info(f"✅ Successfully generated payroll dates for separating contacts.")
+    return contacts
 
 def retrieve_separating_contacts_from_smartsheet(sheet_client: Sheets) -> List[SmartsheetContact]:
     logger.info(f"Retrieving separating employees from Smartsheet...")
@@ -291,10 +292,10 @@ def main():
     # Validate email environment variables
     if not Config.Separations.Email.SENDER_ADDRESS: #not sure if we need this line, depends on if we keep the env variable change I made
         logger.error("❌ Missing environment variable: GMAIL_SENDER_ADDRESS")
-        sys.exit(1)
+        return
     if not Config.Separations.Email.SENDER_APP_PASSWORD:
         logger.error("❌ Missing environment variable: GMAIL_APP_PASSWORD")
-        sys.exit(1)
+        return
     
     # Get Smartsheet and Box client
     try:
@@ -302,16 +303,18 @@ def main():
         box_client: BoxClient = get_box_client()
     except Exception as e:
         logger.exception(f"❌ Failed to fetch Smartsheet/Box.com SDK Client.")
-        sys.exit(1)
+        return
     
     # TODO: Check if recognized holiday sheets need an update
 
     # Generate missing payroll dates for 'awaiting email' rows, else update status to 'missing fields'
     try:
-        generate_missing_payroll_dates_in_smartsheet(sheet_client)
+        contacts = generate_missing_payroll_dates_in_smartsheet(sheet_client)
+        if len(contacts) == 0:
+            return
     except Exception:
         logger.exception(f"❌ Failed to generate missing payroll date(s) for new email separations.")
-        sys.exit(1)
+        return
 
     # Retrieve all separating contacts from Smartsheet
     try:
@@ -320,17 +323,17 @@ def main():
 
         if len(filtered_smartsheet_separating_contacts) == 0:
             logger.info(f"There are no employees who are waiting for their automated email. Exiting program.")
-            sys.exit(1)
+            return
     except Exception as e:
         logger.exception(f"❌ Failed to retrieve separating employees from Smartsheet.")
-        sys.exit(1)
+        return
 
     # Downloading attachments and email template from Box.com
     try:
         download_attachments_and_email_template_from_box(box_client)
     except Exception as e:
         logger.exception(f"❌ Failed to download attachments and email template from Box.com.")
-        sys.exit(1)
+        return
 
     # Email contacts with filled in email templates and attachments
     try:
@@ -338,21 +341,23 @@ def main():
             send_customized_emails_and_attachments(filtered_smartsheet_separating_contacts)
     except Exception as e:
         logger.exception(f"❌ Failed to email contacts their attachments.")
-        sys.exit(1)
+        return
 
     # Update Separation contacts status to 'email sent'
     try:
         update_separation_contacts_email_status(sheet_client, separating_contacts_success_list)
     except Exception as e:
         logger.exception(f"❌ Failed to update Smartsheet Separation contacts.")
-        sys.exit(1)
+        return
 
     # Deletes all attachments and email templates to revert to original state
     try:
         delete_attachments_and_email_templates()
     except Exception as e:
         logger.exception(f"❌ Failed to clean up downloaded files.")
-        sys.exit(1)
+        return
+    
+    logger.info("✅ Successfully finished running Separations script...")
 
 if __name__ == "__main__":
     main()
