@@ -13,6 +13,24 @@ logger = logging.getLogger(__name__)
 
 class Config:
     #####################
+    # Toggling Webhooks for each project using AWS API Gateway & AWS Lambda
+    #####################
+    class WebhookCli:
+        class Smartsheet:
+            EPR_TRACKER_TABLE_ID = 2190844477001604
+            PERSONNEL_MATTERS_TABLE_ID = 1234840859922308
+            SEPARATIONS_TRACKER_TABLE_ID = 6507921459335044
+        
+        class Box:
+            VACANCIES_DEN_UPLOAD_FOLDER_ID = 371269295075
+        
+        class Aws:
+            EPR_TRACKER_API_GATEWAY_ADDRESS = os.getenv("EPR_TRACKER_API_GATEWAY_ADDRESS")
+            PERSONNEL_MATTERS_API_GATEWAY_ADDRESS = os.getenv("PERSONNEL_MATTERS_API_GATEWAY_ADDRESS")
+            SEPARATIONS_API_GATEWAY_ADDRESS = os.getenv("SEPARATIONS_API_GATEWAY_ADDRESS")
+            VACANCIES_API_GATEWAY_ADDRESS = os.getenv("VACANCIES_API_GATEWAY_ADDRESS")
+
+    #####################
     # EPR Tracker Project
     #####################
     class EPRTracker:
@@ -78,22 +96,3 @@ class Config:
     class PersonnelMatters:
         class Smartsheet:
             PERSONNEL_MATTERS_TABLE_ID = 1234840859922308
-    
-
-    #####################
-    # Toggling Webhooks for each project using AWS API Gateway & AWS Lambda
-    #####################
-    class WebhookCli:
-        class Smartsheet:
-            EPR_TRACKER_TABLE_ID = 2190844477001604
-            PERSONNEL_MATTERS_TABLE_ID = 1234840859922308
-            SEPARATIONS_TRACKER_TABLE_ID = 6507921459335044
-        
-        class Box:
-            VACANCIES_DEN_UPLOAD_FOLDER_ID = 371269295075
-        
-        class Aws:
-            EPR_TRACKER_API_GATEWAY_ADDRESS = os.getenv("EPR_TRACKER_API_GATEWAY_ADDRESS")
-            PERSONNEL_MATTERS_API_GATEWAY_ADDRESS = os.getenv("PERSONNEL_MATTERS_API_GATEWAY_ADDRESS")
-            SEPARATIONS_API_GATEWAY_ADDRESS = os.getenv("SEPARATIONS_API_GATEWAY_ADDRESS")
-            VACANCIES_API_GATEWAY_ADDRESS = os.getenv("VACANCIES_API_GATEWAY_ADDRESS")
