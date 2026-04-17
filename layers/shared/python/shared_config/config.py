@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 class Config:
     #####################
+    # Fetching Smartsheet Table and Column IDs AND
     # Toggling Webhooks for each project using AWS API Gateway & AWS Lambda
     #####################
     class WebhookCli:
@@ -20,6 +21,7 @@ class Config:
             EPR_TRACKER_TABLE_ID = 2190844477001604
             PERSONNEL_MATTERS_TABLE_ID = 1234840859922308
             SEPARATIONS_TRACKER_TABLE_ID = 6507921459335044
+            VACANCIES_AND_RECRUITMENT_TRACKER_TABLE_ID = 4963448636002180
         
         class Box:
             VACANCIES_DEN_UPLOAD_FOLDER_ID = 371269295075
