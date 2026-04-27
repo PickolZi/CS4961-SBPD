@@ -46,6 +46,12 @@ if Settings.STAGE == Settings.Stage.DEV:
     logger_stream_handler.setFormatter(logging.Formatter("%(asctime)s:[%(levelname)s]:%(message)s"))
     logger.addHandler(logger_stream_handler)
 
+PAYROLL_START_DATE_EPOCH = date(2025, 1, 6)  # Will be used to calculate every future payroll period
+REQUIRED_COLUMN_TITLES_MAP = {
+    Config.Separations.Smartsheet.COLUMN_EMAIL_STATUS_ID: "email_status",
+    Config.Separations.Smartsheet.COLUMN_STAFF_EMAIL_COLUMN_ID: "email",
+    Config.Separations.Smartsheet.COLUMN_LAST_DAY_DATE_ID: "last_day_date"
+}
 
 def generate_missing_payroll_dates_in_smartsheet(sheet_client: Sheets) -> list:
     # TODO: Add error handling here
@@ -91,9 +97,9 @@ def generate_missing_payroll_dates_in_smartsheet(sheet_client: Sheets) -> list:
     rows_to_update = []
     for contact in contacts:
         contact_last_day: date = contact[1]
-        days_since_epoch: timedelta = contact_last_day - Config.Separations.Smartsheet.PAYROLL_START_DATE_EPOCH
+        days_since_epoch: timedelta = contact_last_day - PAYROLL_START_DATE_EPOCH
         days_diff = days_since_epoch - timedelta(days=days_since_epoch.days % 14)
-        new_payroll_start_date = Config.Separations.Smartsheet.PAYROLL_START_DATE_EPOCH + days_diff
+        new_payroll_start_date = PAYROLL_START_DATE_EPOCH + days_diff
         new_payroll_end_date = new_payroll_start_date + timedelta(days=13)
         new_payroll_pay_date = new_payroll_end_date + timedelta(days=11)
 
@@ -156,8 +162,8 @@ def retrieve_separating_contacts_from_smartsheet(sheet_client: Sheets) -> List[S
             cell_id = cell.get("columnId")
             cell_value = cell.get("value")
 
-            if cell_id in Config.Separations.Smartsheet.REQUIRED_COLUMN_TITLES_MAP:
-                contact_dict[Config.Separations.Smartsheet.REQUIRED_COLUMN_TITLES_MAP[cell_id]] = cell_value
+            if cell_id in REQUIRED_COLUMN_TITLES_MAP:
+                contact_dict[REQUIRED_COLUMN_TITLES_MAP[cell_id]] = cell_value
             contact_dict[smartsheet_extra_column_titles_map[cell_id]] = cell_value
         
         # These 3 attributes must exist
@@ -189,8 +195,8 @@ def download_attachments_and_email_template_from_box(box_client: BoxClient):
         Constants.Separations.Box.SYNC_EMAIL_TEMPLATE_FOLDER_PATH.mkdir()
 
     # Save attachments metadata from Box.com
-    box_attachments_folder: BoxFolder = BoxFolder(Config.Separations.Box.IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID)
-    for entry in box_client.folders.get_folder_items(Config.Separations.Box.IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID).entries:
+    box_attachments_folder: BoxFolder = BoxFolder(str(Config.Separations.Box.IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID))
+    for entry in box_client.folders.get_folder_items(str(Config.Separations.Box.IMPORTANT_ATTACHMENTS_TO_SEND_FOLDER_ID)).entries:
         box_file: BoxFile = BoxFile(entry.id, entry.name, entry.file_version.id, entry.sha_1)
         box_attachments_folder.contents.append(box_file)
 
@@ -206,7 +212,7 @@ def download_attachments_and_email_template_from_box(box_client: BoxClient):
     # Download email template(.boxnote extension)
     with open(Constants.Separations.Box.EMAIL_TEMPLATE_BOXNOTE_PATH, "wb") as f:
         logger.info(f"  Downloading email attachment: {Constants.Separations.Box.EMAIL_TEMPLATE_BOXNOTE_FILENAME}...")
-        box_client.downloads.download_file_to_output_stream(Config.Separations.Box.EMAIL_TEMPLATE_FILE_ID, f)
+        box_client.downloads.download_file_to_output_stream(str(Config.Separations.Box.EMAIL_TEMPLATE_FILE_ID), f)
 
     # TODO: Look over image converting from boxnote to html as that might be broken/is untested.
     logger.info(f"  Converting email template from boxnote to HTML format...")
