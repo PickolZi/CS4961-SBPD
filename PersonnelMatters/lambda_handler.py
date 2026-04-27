@@ -69,11 +69,6 @@ def lambda_handler(event, context):
             should_run = True
             break
 
-        elif event_type == "updated":
-            logger.info(f"Personnel Matters update detected. row_id={row_id}, event_id={event_id}")
-            should_run = True
-            break
-
     if should_run:
         try:
             main()

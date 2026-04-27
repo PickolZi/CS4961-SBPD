@@ -67,6 +67,13 @@ class Constants:
 
             EMAIL_TEMPLATE_HTML_PATH = SYNC_EMAIL_TEMPLATE_FOLDER_PATH / Path("email_template.html")
             EMAIL_TEMPLATE_BOXNOTE_PATH = SYNC_EMAIL_TEMPLATE_FOLDER_PATH / Path("email_template.boxnote")
+    
+    class PersonnelMatters:
+        class Smartsheet:
+            BOX_SYNC_PENDING_UPLOAD_STATUS = "Pending Upload"
+            BOX_SYNC_UPLOADED_STATUS = "Uploaded"
+            BOX_SYNC_UPLOAD_FAILED_STATUS = "Upload Failed"
+            BOX_SYNC_NO_ATTACHMENT_STATUS = "No Attachment"
 
 
 AWS_SECRETS_MANAGER_SECRET_NAME = "prod/sbpd-csula"
